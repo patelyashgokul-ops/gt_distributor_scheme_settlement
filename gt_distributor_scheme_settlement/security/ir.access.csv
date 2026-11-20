@@ -35,3 +35,5 @@ access_revision_manager,claim revision manager,gt.distributor.scheme.claim.revis
 access_revision_auditor,claim revision auditor,gt.distributor.scheme.claim.revision,gt_distributor_scheme_settlement.group_scheme_auditor,r,
 access_decision_wizard_operator,claim decision wizard operator,gt.distributor.scheme.claim.decision.wizard,gt_distributor_scheme_settlement.group_scheme_operator,cru,
 access_decision_wizard_manager,claim decision wizard manager,gt.distributor.scheme.claim.decision.wizard,gt_distributor_scheme_settlement.group_scheme_manager,cru,
+access_fulfillment_wizard_manager,fulfillment wizard manager,gt.distributor.scheme.fulfillment.wizard,gt_distributor_scheme_settlement.group_scheme_manager,cru,
+access_adjustment_review_wizard_manager,adjustment review wizard manager,gt.distributor.scheme.adjustment.review.wizard,gt_distributor_scheme_settlement.group_scheme_manager,cru,

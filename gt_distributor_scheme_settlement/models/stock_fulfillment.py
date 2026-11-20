@@ -3,11 +3,40 @@ import hashlib
 from odoo import _, api, models
 from odoo.exceptions import AccessError, UserError, ValidationError
 
-from .service_tokens import ADJUSTMENT_TOKEN, CLAIM_WRITE_TOKEN, FULFILLMENT_TOKEN
+from .service_tokens import ADJUSTMENT_TOKEN, CLAIM_WRITE_TOKEN, STOCK_DONE_TOKEN
 
 
 class StockMove(models.Model):
     _inherit = "stock.move"
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        for vals in vals_list:
+            if vals.get("state") == "done" and vals.get("sale_line_id"):
+                line = self.env["sale.order.line"].browse(vals["sale_line_id"])
+                if line.order_id.scheme_claim_id:
+                    raise AccessError(_("Scheme reward movements must be completed through the standard validated stock workflow."))
+        return super().create(vals_list)
+
+    def write(self, vals):
+        protected = self.filtered(lambda move: move._scheme_claim_for_p06())
+        if protected:
+            if vals.get("state") == "done" and self.env.context.get("_gt_stock_done_token") is not STOCK_DONE_TOKEN:
+                raise AccessError(_("Scheme reward stock moves can only be completed through validated stock operations."))
+            if "sale_line_id" in vals and any(move.sale_line_id.id != (vals["sale_line_id"] or False) for move in protected):
+                raise AccessError(_("A scheme reward move's originating order line cannot be replaced."))
+            if "origin_returned_move_id" in vals and any(move.origin_returned_move_id.id != (vals["origin_returned_move_id"] or False) for move in protected):
+                raise AccessError(_("A scheme reward move's stock return origin cannot be replaced."))
+            if any(move.state == "done" for move in protected) and self.env.context.get("_gt_stock_done_token") is not STOCK_DONE_TOKEN:
+                immutable = {"quantity", "product_uom_qty", "uom_id", "product_id", "company_id", "sale_line_id", "origin_returned_move_id", "location_id", "location_dest_id", "picking_id"}
+                if immutable.intersection(vals):
+                    raise AccessError(_("Completed scheme reward movement evidence is immutable."))
+        return super().write(vals)
+
+    def unlink(self):
+        if any(move.state == "done" and move._scheme_claim_for_p06() for move in self):
+            raise UserError(_("Completed scheme reward movements are historical evidence and cannot be deleted."))
+        return super().unlink()
 
     def _scheme_claim_for_p06(self):
         line = self.sale_line_id
@@ -48,6 +77,10 @@ class StockMove(models.Model):
                     claim.company_id.id, claim.distributor_id.commercial_partner_id.id
                 )
                 claim_moves = scoped.filtered(lambda move: move._scheme_claim_for_p06() == claim)
+                for move in claim_moves:
+                    if (move.company_id != claim.company_id or move.product_id != claim.approved_reward_product_id
+                        or move.sale_line_id and move.sale_line_id.order_id != claim.fulfillment_order_id):
+                        raise ValidationError(_("A linked stock move does not match the approved claim, company, product, and fulfillment order."))
                 outgoing = claim_moves.filtered(lambda move:
                     not move.origin_returned_move_id and move.location_dest_id.usage == "customer"
                     and move.location_id.usage != "customer"
@@ -73,7 +106,7 @@ class StockMove(models.Model):
                     return_qty = sum(move.uom_id._compute_quantity(move.quantity, claim.approved_reward_uom_id, round=False) for move in returning)
                     if claim.approved_reward_uom_id.compare(metrics["net"] - return_qty, 0.0) < 0:
                         raise UserError(_("The linked reward return exceeds the verified completed delivery quantity."))
-        result = super()._action_done(cancel_backorder=cancel_backorder)
+        result = super(StockMove, self.with_context(_gt_stock_done_token=STOCK_DONE_TOKEN))._action_done(cancel_backorder=cancel_backorder)
         for claim in claims:
             moves = scoped.filtered(lambda move: move._scheme_claim_for_p06() == claim)
             pickings = moves.mapped("picking_id")
@@ -105,3 +138,30 @@ class StockMove(models.Model):
                 updates["state"] = "fulfillment_in_progress"
             claim.with_context(_gt_claim_write_token=CLAIM_WRITE_TOKEN).write(updates)
         return result
+
+
+class StockMoveLine(models.Model):
+    _inherit = "stock.move.line"
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        for vals in vals_list:
+            move = self.env["stock.move"].browse(vals.get("move_id"))
+            if move.state == "done" and move._scheme_claim_for_p06():
+                raise AccessError(_("Completed scheme reward operation lines cannot be added."))
+        return super().create(vals_list)
+
+    def write(self, vals):
+        linked = self.filtered(lambda line: line.move_id._scheme_claim_for_p06())
+        if linked and any(line.move_id.state == "done" for line in linked):
+            if self.env.context.get("_gt_stock_done_token") is not STOCK_DONE_TOKEN:
+                protected = {"move_id", "product_id", "quantity", "quantity_product_uom", "lot_id", "lot_name", "location_id", "location_dest_id", "company_id"}
+                if protected.intersection(vals):
+                    raise AccessError(_("Completed scheme reward operation lines are immutable."))
+        return super().write(vals)
+
+    def unlink(self):
+        linked = self.filtered(lambda line: line.move_id.state == "done" and line.move_id._scheme_claim_for_p06())
+        if linked:
+            raise UserError(_("Completed scheme reward operation lines are historical evidence and cannot be deleted."))
+        return super().unlink()

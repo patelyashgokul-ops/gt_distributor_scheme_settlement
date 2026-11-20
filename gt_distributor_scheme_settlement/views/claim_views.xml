@@ -45,7 +45,19 @@
                             context="{'default_decision': 'revise'}"
                             groups="gt_distributor_scheme_settlement.group_scheme_operator,gt_distributor_scheme_settlement.group_scheme_manager"
                             invisible="state in ['approved', 'rejected', 'fulfilled', 'settled', 'cancelled']"/>
-                    <field name="state" widget="statusbar" statusbar_visible="draft,submitted,under_review,approved,rejected,fulfilled,settled" readonly="1"/>
+                    <button name="action_open_fulfillment_wizard" type="object" string="Prepare Free Goods Fulfillment" class="btn-primary"
+                            groups="gt_distributor_scheme_settlement.group_scheme_manager"
+                            invisible="state not in ['approved', 'fulfillment_in_progress']"/>
+                    <button name="action_view_fulfillment_order" type="object" string="View Fulfillment Order"
+                            groups="gt_distributor_scheme_settlement.group_scheme_operator,gt_distributor_scheme_settlement.group_scheme_manager"
+                            invisible="not fulfillment_order_id"/>
+                    <button name="action_reconcile_fulfillment" type="object" string="Reconcile Fulfillment"
+                            groups="gt_distributor_scheme_settlement.group_scheme_manager"
+                            invisible="state not in ['fulfillment_in_progress', 'settled', 'adjustment_required']"/>
+                    <button name="action_finalize_settlement" type="object" string="Finalize Settlement" class="btn-primary"
+                            groups="gt_distributor_scheme_settlement.group_scheme_manager"
+                            invisible="state != 'fulfillment_in_progress'"/>
+                    <field name="state" widget="statusbar" statusbar_visible="draft,submitted,under_review,approved,rejected,fulfillment_in_progress,settled,adjustment_required" readonly="1"/>
                 </header>
                 <sheet>
                     <div class="oe_title"><h1><field name="name"/></h1></div>
@@ -190,6 +202,46 @@
                                 <field name="approval_evidence_hash"/>
                                 <field name="approval_evidence" widget="text"/>
                             </group>
+                        </page>
+                        <page string="Fulfillment and Settlement" invisible="state in ['draft', 'submitted', 'under_review', 'rejected']">
+                            <group>
+                                <group string="Approved Entitlement">
+                                    <field name="approved_reward_product_id"/>
+                                    <field name="approved_reward_uom_id"/>
+                                    <field name="approved_reward_quantity"/>
+                                    <field name="fulfillment_status" widget="badge"/>
+                                </group>
+                                <group string="Verified Stock Reconciliation">
+                                    <field name="fulfilled_quantity"/>
+                                    <field name="returned_quantity"/>
+                                    <field name="net_fulfilled_quantity"/>
+                                    <field name="outstanding_quantity"/>
+                                </group>
+                            </group>
+                            <group string="Fulfillment Order">
+                                <field name="fulfillment_order_id"/>
+                                <field name="fulfillment_order_created_by_id"/>
+                                <field name="fulfillment_order_created_at"/>
+                                <field name="fulfillment_picking_ids" widget="many2many_tags"/>
+                            </group>
+                            <group string="Settlement Evidence" invisible="state != 'settled'">
+                                <field name="settled_by_id"/>
+                                <field name="settled_at"/>
+                                <field name="reconciliation_fingerprint"/>
+                                <field name="settlement_evidence_hash"/>
+                                <field name="settlement_evidence"/>
+                            </group>
+                            <field name="adjustment_ids" readonly="1">
+                                <list string="Adjustment Exceptions">
+                                    <field name="adjustment_date"/>
+                                    <field name="adjustment_type"/>
+                                    <field name="quantity_delta"/>
+                                    <field name="potential_excess_fulfillment"/>
+                                    <field name="status" widget="badge"/>
+                                    <button name="action_open_review_wizard" type="object" string="Review"
+                                            groups="gt_distributor_scheme_settlement.group_scheme_manager"/>
+                                </list>
+                            </field>
                         </page>
                         <page string="Audit History">
                             <field name="audit_ids" readonly="1">

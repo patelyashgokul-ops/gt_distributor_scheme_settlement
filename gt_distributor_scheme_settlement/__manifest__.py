@@ -10,6 +10,7 @@
     "depends": ["sale_stock", "account", "mail"],
     "data": [
         "data/sequence.xml",
+        "data/p06_cron.xml",
         "security/groups.xml",
         "security/ir.access.csv",
         "views/scheme_views.xml",

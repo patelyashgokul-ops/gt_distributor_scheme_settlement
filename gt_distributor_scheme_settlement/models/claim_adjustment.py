@@ -93,6 +93,17 @@ class DistributorSchemeClaimAdjustment(models.Model):
             })
         return True
 
+    def action_open_review_wizard(self):
+        self.ensure_one()
+        self.check_access("read")
+        if not self.env.user.has_group("gt_distributor_scheme_settlement.group_scheme_manager"):
+            raise AccessError(_("Only a scheme manager may review adjustment evidence."))
+        if self.company_id != self.env.company or self.company_id not in self.env.companies:
+            raise AccessError(_("Switch to the adjustment company before reviewing it."))
+        return {"type": "ir.actions.act_window", "name": _("Review Settlement Adjustment"),
+                "res_model": "gt.distributor.scheme.adjustment.review.wizard", "view_mode": "form",
+                "target": "new", "context": {"default_adjustment_id": self.id}}
+
     def write(self, vals):
         if self.env.context.get("_gt_adjustment_token") is ADJUSTMENT_TOKEN:
             return super().write(vals)

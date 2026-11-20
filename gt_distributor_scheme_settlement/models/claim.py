@@ -5,7 +5,7 @@ import logging
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import timedelta
 
-from odoo import api, fields, models, _
+from odoo import api, fields, models, _, SUPERUSER_ID
 from odoo.exceptions import AccessError, UserError, ValidationError
 from odoo.tools.float_utils import float_compare
 
@@ -306,6 +306,13 @@ class DistributorSchemeClaim(models.Model):
             "context": {"default_claim_id": self.id},
         }
 
+    def action_view_fulfillment_order(self):
+        self.ensure_one()
+        self._check_action_access()
+        if not self.fulfillment_order_id:
+            raise UserError(_("This claim has no fulfillment order yet."))
+        return self._fulfillment_order_action(self.fulfillment_order_id)
+
     @api.model
     def _fulfillment_order_action(self, order):
         return {"type": "ir.actions.act_window", "name": _("Free Goods Fulfillment"),
@@ -404,6 +411,16 @@ class DistributorSchemeClaim(models.Model):
         self.invalidate_recordset()
         if not self.fulfillment_order_id:
             raise UserError(_("This approved claim has no fulfillment order."))
+        self.env["account.move"]._gt_lock_scheme_source_scope(
+            self.company_id.id, self.distributor_id.commercial_partner_id.id
+        )
+        validation = self._active_validation()
+        if validation["status"] != "current":
+            self._store_revalidation(validation)
+            self._record_p06_adjustment(validation)
+            if self.state != "adjustment_required":
+                self.with_context(_gt_claim_write_token=CLAIM_WRITE_TOKEN).write({"state": "adjustment_required"})
+            return self._p06_notification(_("Reconciliation blocked"), _("Accounting source changes require manager review."), "warning")
         metrics = self._fulfillment_metrics()
         if metrics["net"] < -1e-9 or self.approved_reward_uom_id.compare(metrics["net"], self.approved_reward_quantity) > 0:
             fingerprint = hashlib.sha256(f"over:{self.id}:{metrics['net']:.12f}".encode()).hexdigest()
@@ -419,7 +436,7 @@ class DistributorSchemeClaim(models.Model):
                     "validation_status": self.source_validation_status, "evidence_payload": metrics, "status": "blocked",
                 })
             self.with_context(_gt_claim_write_token=CLAIM_WRITE_TOKEN).write({"state": "adjustment_required"})
-            raise UserError(_("Fulfillment reconciliation found an over-delivery or negative result. Review the adjustment before proceeding."))
+            return self._p06_notification(_("Fulfillment exception"), _("Reconciliation found an over-delivery or negative result. The evidence was preserved and settlement is blocked pending review."), "danger")
         if self.state not in ("settled", "adjustment_required"):
             self.with_context(_gt_claim_write_token=CLAIM_WRITE_TOKEN).write({"state": "fulfillment_in_progress"})
         return metrics
@@ -1244,8 +1261,9 @@ class DistributorSchemeClaim(models.Model):
     @api.model
     def _cron_scan_post_approval_source_changes(self):
         """Bounded scan. Each calculation runs as a manager with invoice read access."""
-        if self.env.context.get("_gt_p06_monitor_token") is not P06_MONITOR_TOKEN:
+        if self.env.uid != SUPERUSER_ID:
             raise AccessError(_("Post-approval source monitoring can only run through its scheduled service."))
+        self = self.with_context(_gt_p06_monitor_token=P06_MONITOR_TOKEN)
         company_model = self.env["res.company"]
         manager_group = self.env.ref("gt_distributor_scheme_settlement.group_scheme_manager")
         companies = company_model.search([])
