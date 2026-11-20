@@ -16,9 +16,10 @@ class DistributorSchemePeriod(models.Model):
     date_end = fields.Date(required=True)
     state = fields.Selection([("open", "Open"), ("closed", "Closed")], default="open", required=True)
 
-    _sql_constraints = [
-        ("scheme_period_dates_uniq", "unique(scheme_id, date_start, date_end)", "A scheme cannot have duplicate calculation periods."),
-    ]
+    _scheme_period_dates_uniq = models.Constraint(
+        "unique(scheme_id, date_start, date_end)",
+        "A scheme cannot have duplicate calculation periods.",
+    )
 
     @api.model_create_multi
     def create(self, vals_list):

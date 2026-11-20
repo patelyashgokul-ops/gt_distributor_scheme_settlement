@@ -17,9 +17,10 @@ class DistributorSchemeSlab(models.Model):
     maximum_quantity = fields.Float(string="Exclusive Upper Boundary", digits="Product Unit of Measure", help="Optional exclusive upper boundary. Leave blank for no upper limit.")
     reward_quantity = fields.Float(required=True, digits="Product Unit of Measure")
 
-    _sql_constraints = [
-        ("scheme_minimum_quantity_uniq", "unique(scheme_id, minimum_quantity)", "A scheme cannot have duplicate slab minimum quantities."),
-    ]
+    _scheme_minimum_quantity_uniq = models.Constraint(
+        "unique(scheme_id, minimum_quantity)",
+        "A scheme cannot have duplicate slab minimum quantities.",
+    )
 
     @api.depends("minimum_quantity", "maximum_quantity", "reward_quantity")
     def _compute_name(self):

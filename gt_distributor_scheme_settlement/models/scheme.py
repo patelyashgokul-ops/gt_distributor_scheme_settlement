@@ -24,10 +24,12 @@ class DistributorScheme(models.Model):
     state = fields.Selection([("draft", "Draft"), ("active", "Active"), ("closed", "Closed"), ("cancelled", "Cancelled")], default="draft", required=True, copy=False, tracking=True)
     notes = fields.Text()
 
-    _sql_constraints = [
-        ("scheme_code_company_uniq", "unique(company_id, code)", "Scheme code must be unique per company."),
-        ("scheme_code_nonempty", "CHECK (char_length(trim(code)) > 0)", "Scheme code cannot be blank."),
-    ]
+    _scheme_code_company_uniq = models.Constraint(
+        "unique(company_id, code)", "Scheme code must be unique per company."
+    )
+    _scheme_code_nonempty = models.Constraint(
+        "CHECK (char_length(trim(code)) > 0)", "Scheme code cannot be blank."
+    )
 
     @api.model_create_multi
     def create(self, vals_list):
