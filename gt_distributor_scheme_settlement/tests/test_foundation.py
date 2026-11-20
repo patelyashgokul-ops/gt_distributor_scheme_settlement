@@ -636,6 +636,8 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
         )
         invoice_write_date = invoice.write_date
         claims_before = self.env["gt.distributor.scheme.claim"].search_count([])
+        moves_before = self.env["account.move"].search_count([("company_id", "=", self.company_a.id)])
+        pickings_before = self.env["stock.picking"].search_count([("company_id", "=", self.company_a.id)])
         self._close_p04(period)
         self.assertEqual(period.state, "closed")
         self.assertEqual(period.generated_claim_count, 1)
@@ -659,8 +661,8 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
         self.assertEqual(claim.source_ids.quantity, 25)
         self.assertEqual(claim.source_ids.source_role, "invoice")
         self.assertEqual(invoice.write_date, invoice_write_date)
-        self.assertEqual(self.env["account.move"].search_count([("company_id", "=", self.company_a.id)]), 1)
-        self.assertEqual(self.env["stock.picking"].search_count([("company_id", "=", self.company_a.id)]), 0)
+        self.assertEqual(self.env["account.move"].search_count([("company_id", "=", self.company_a.id)]), moves_before)
+        self.assertEqual(self.env["stock.picking"].search_count([("company_id", "=", self.company_a.id)]), pickings_before)
         self.assertEqual(self.env["gt.distributor.scheme.claim"].search_count([]), claims_before + 1)
         events = self.env["gt.distributor.scheme.audit"].search([("scheme_id", "=", scheme.id)])
         self.assertIn("period_closed", events.mapped("event_type"))
@@ -843,6 +845,76 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
         with self.assertRaises(AccessError):
             source.unlink()
         self.assertTrue(claim._check_snapshot_integrity())
+
+    def test_p04_period_overlap_and_adjacent_boundaries(self):
+        scheme, _period = self._p04_scheme_period(code="P04-PERIOD-RANGES")
+        adjacent = self.env["gt.distributor.scheme.period"].with_user(self.manager).create({
+            "name": "Adjacent February Period", "scheme_id": scheme.id,
+            "date_start": "2026-02-01", "date_end": "2026-02-28",
+        })
+        self.assertEqual(adjacent.date_start, fields.Date.to_date("2026-02-01"))
+        with self.assertRaises(ValidationError):
+            self.env["gt.distributor.scheme.period"].with_user(self.manager).create({
+                "name": "Overlapping Period", "scheme_id": scheme.id,
+                "date_start": "2026-01-31", "date_end": "2026-02-15",
+            })
+
+    def test_p04_draft_period_open_requires_manager(self):
+        scheme, _period = self._p04_scheme_period(code="P04-OPEN")
+        draft = self.env["gt.distributor.scheme.period"].with_user(self.manager).create({
+            "name": "Draft P04 Period", "scheme_id": scheme.id, "state": "draft",
+            "date_start": "2026-03-01", "date_end": "2026-03-31",
+        })
+        with self.assertRaises(AccessError):
+            draft.with_user(self.operator).action_open_period()
+        draft.with_user(self.manager).action_open_period()
+        self.assertEqual(draft.state, "open")
+        self.assertTrue(self.env["gt.distributor.scheme.audit"].search_count([
+            ("scheme_id", "=", scheme.id), ("event_type", "=", "period_opened")
+        ]))
+
+    def test_p04_active_scheme_and_slab_configuration_are_immutable(self):
+        scheme, _period = self._p04_scheme_period(code="P04-ACTIVE-CONFIG")
+        with self.assertRaises(ValidationError):
+            scheme.write({"qualifying_product_id": self.other_product_a.id})
+        with self.assertRaises(ValidationError):
+            scheme.slab_ids.write({"reward_quantity": 500})
+        with self.assertRaises(ValidationError):
+            scheme.slab_ids.unlink()
+
+    def test_p04_refund_quantity_is_saved_as_negative_source_contribution(self):
+        _scheme, period = self._p04_scheme_period(code="P04-REFUND-SOURCES")
+        invoice = self._create_invoice_one_line(product_id=self.product_a, quantity=25,
+                                                invoice_date="2026-01-10", partner_id=self.distributor.id, post=True)
+        self._create_invoice_one_line(move_type="out_refund", product_id=self.product_a, quantity=5,
+                                      invoice_date="2026-01-20", partner_id=self.distributor.id,
+                                      reversed_entry_id=invoice.id, post=True)
+        self._close_p04(period)
+        claim = period.claim_ids
+        self.assertEqual(claim.gross_quantity, 25)
+        self.assertEqual(claim.refund_quantity, 5)
+        self.assertEqual(claim.net_quantity, 20)
+        self.assertEqual(len(claim.source_ids), 2)
+        refund_source = claim.source_ids.filtered(lambda source: source.source_role == "refund")
+        self.assertEqual(refund_source.quantity, -5)
+        self.assertEqual(refund_source.origin_invoice_id, invoice)
+
+    def test_p04_two_distributors_receive_separate_claims(self):
+        second_distributor = self.env["res.partner"].create({
+            "name": "Scheme Test Distributor Two", "vat": "P04DISTRICTWO",
+        })
+        second_distributor.with_company(self.company_a).property_account_receivable_id = self.distributor.with_company(self.company_a).property_account_receivable_id
+        _scheme, period = self._p04_scheme_period(
+            code="P04-MULTI-DIST", distributors=self.distributor | second_distributor,
+        )
+        self._create_invoice_one_line(product_id=self.product_a, quantity=10,
+                                      invoice_date="2026-01-10", partner_id=self.distributor.id, post=True)
+        self._create_invoice_one_line(product_id=self.product_a, quantity=20,
+                                      invoice_date="2026-01-11", partner_id=second_distributor.id, post=True)
+        self._close_p04(period)
+        self.assertEqual(period.generated_claim_count, 2)
+        self.assertEqual(set(period.claim_ids.mapped("distributor_id").ids), {self.distributor.id, second_distributor.id})
+        self.assertEqual(sorted(period.claim_ids.mapped("net_quantity")), [10, 20])
 
     def test_xml_views_and_menu_references_load(self):
         refs = [
