@@ -203,6 +203,12 @@ class DistributorSchemePeriod(models.Model):
     def _close_locked(self, cutoff):
         self.ensure_one()
         scheme = self.scheme_id
+        # Coordinate with posted customer-document changes, including new
+        # backdated documents that do not yet have accounting-line row locks.
+        for distributor in scheme.distributor_ids.sorted("id"):
+            self.env["account.move"]._gt_lock_scheme_source_scope(
+                self.company_id.id, distributor.commercial_partner_id.id
+            )
         calculator = self.env["gt.distributor.scheme.calculator"]
         calculations = []
         for distributor in scheme.distributor_ids.sorted("id"):

@@ -612,6 +612,9 @@ class DistributorSchemeClaim(models.Model):
             raise ValidationError(_("Enter a revision reason of at least five characters."))
         if self.state not in ("draft", "submitted", "under_review"):
             raise UserError(_("Only an unapproved claim can be revised."))
+        self.env["account.move"]._gt_lock_scheme_source_scope(
+            self.company_id.id, self.distributor_id.commercial_partner_id.id
+        )
         if self.period_id.state != "closed":
             raise UserError(_("A claim revision requires a closed scheme period."))
         result = self.env["gt.distributor.scheme.calculator"].calculate_eligibility(
@@ -769,6 +772,11 @@ class DistributorSchemeClaim(models.Model):
             raise UserError(_("Only a claim Under Review can be approved."))
         if self.period_id.state != "closed" or self.scheme_id.state != "active" or self.period_id.scheme_id != self.scheme_id:
             raise ValidationError(_("Approval requires the claim's active scheme and closed period."))
+        # Serialize this decision against supported ORM posting or edits to
+        # customer invoices and refunds for this company/distributor.
+        self.env["account.move"]._gt_lock_scheme_source_scope(
+            self.company_id.id, self.distributor_id.commercial_partner_id.id
+        )
         self._check_snapshot_integrity()
         revision = self.active_revision_id
         if revision and revision.state != "proposed":
