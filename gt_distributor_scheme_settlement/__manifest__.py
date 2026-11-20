@@ -5,7 +5,6 @@
     "category": "Sales/Sales",
     "author": "Golok Technology",
     "maintainer": "Golok Technology",
-    "website": "https://goloktechnology.com",
     "support": "patelyash.gokul@gmail.com",
     "license": "OPL-1",
     "depends": ["sale_management", "account", "stock"],

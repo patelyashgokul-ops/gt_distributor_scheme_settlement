@@ -17,6 +17,12 @@ class DistributorSchemeClaimAdjustment(models.Model):
     source_move_id = fields.Many2one("account.move", check_company=True, ondelete="restrict")
     created_by_id = fields.Many2one("res.users", required=True, default=lambda self: self.env.user, readonly=True)
 
+    @api.model_create_multi
+    def create(self, vals_list):
+        for vals in vals_list:
+            vals["created_by_id"] = self.env.user.id
+        return super().create(vals_list)
+
     @api.constrains("quantity_delta", "reason", "claim_id", "source_move_id")
     def _check_adjustment(self):
         for rec in self:

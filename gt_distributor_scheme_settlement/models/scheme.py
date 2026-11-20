@@ -29,6 +29,13 @@ class DistributorScheme(models.Model):
         ("scheme_code_nonempty", "CHECK (char_length(trim(code)) > 0)", "Scheme code cannot be blank."),
     ]
 
+    @api.model_create_multi
+    def create(self, vals_list):
+        for vals in vals_list:
+            if vals.get("state", "draft") != "draft":
+                raise ValidationError(_("A scheme must be created in Draft; lifecycle transitions are reserved for a later release."))
+        return super().create(vals_list)
+
     @api.constrains("date_start", "date_end")
     def _check_dates(self):
         for record in self:

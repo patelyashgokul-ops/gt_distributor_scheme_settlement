@@ -27,6 +27,10 @@ class DistributorSchemeClaim(models.Model):
     @api.model_create_multi
     def create(self, vals_list):
         for vals in vals_list:
+            if vals.get("state", "draft") != "draft":
+                raise ValidationError(_("A claim must be created in Draft; workflow transitions are reserved for a later release."))
+            if {"approved_by_id", "approved_at", "fulfillment_order_id", "fulfillment_picking_ids"} & vals.keys():
+                raise ValidationError(_("Approval and fulfillment metadata are managed by future workflow services."))
             if vals.get("name", "New") == "New":
                 vals["name"] = self.env["ir.sequence"].next_by_code("gt.distributor.scheme.claim") or "New"
         return super().create(vals_list)

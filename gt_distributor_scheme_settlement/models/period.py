@@ -16,6 +16,18 @@ class DistributorSchemePeriod(models.Model):
     date_end = fields.Date(required=True)
     state = fields.Selection([("open", "Open"), ("closed", "Closed")], default="open", required=True)
 
+    @api.model_create_multi
+    def create(self, vals_list):
+        for vals in vals_list:
+            if vals.get("state", "open") != "open":
+                raise ValidationError(_("A scheme period must be created Open; closure is reserved for a later release."))
+        return super().create(vals_list)
+
+    def write(self, vals):
+        if "state" in vals and any(record.state != vals["state"] for record in self):
+            raise ValidationError(_("Period closure is reserved for a later release."))
+        return super().write(vals)
+
     @api.constrains("date_start", "date_end", "scheme_id")
     def _check_dates(self):
         for rec in self:

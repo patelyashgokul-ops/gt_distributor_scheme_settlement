@@ -26,7 +26,7 @@
                         <group>
                             <field name="code"/>
                             <field name="company_id" groups="base.group_multi_company"/>
-                            <field name="state" widget="statusbar" statusbar_visible="draft,active,closed,cancelled"/>
+                            <field name="state" widget="statusbar" statusbar_visible="draft,active,closed,cancelled" readonly="1"/>
                         </group>
                         <group>
                             <field name="date_start"/>

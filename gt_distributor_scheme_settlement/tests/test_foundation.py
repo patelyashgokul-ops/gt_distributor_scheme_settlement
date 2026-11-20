@@ -87,6 +87,42 @@ class TestDistributorSchemeFoundation(TransactionCase):
         with self.assertRaises(ValidationError):
             self.scheme.write({"date_start": "2026-12-31", "date_end": "2026-01-01"})
 
+    def test_unimplemented_lifecycle_and_metadata_cannot_be_forged(self):
+        with self.assertRaises(ValidationError):
+            self.env["gt.distributor.scheme"].create({
+                "name": "Premature Active Scheme",
+                "code": "PREMATURE",
+                "company_id": self.company_a.id,
+                "qualifying_product_id": self.product_a.id,
+                "reward_product_id": self.reward_a.id,
+                "distributor_ids": [(4, self.distributor.id)],
+                "date_start": "2026-01-01",
+                "date_end": "2026-12-31",
+                "qualifying_uom_id": self.product_a.uom_id.id,
+                "state": "active",
+            })
+
+        period = self.env["gt.distributor.scheme.period"].create({
+            "name": "January 2026",
+            "scheme_id": self.scheme.id,
+            "date_start": "2026-01-01",
+            "date_end": "2026-01-31",
+        })
+        with self.assertRaises(ValidationError):
+            period.write({"state": "closed"})
+
+        with self.assertRaises(ValidationError):
+            self.env["gt.distributor.scheme.claim"].create({
+                "name": "Forged Approval",
+                "scheme_id": self.scheme.id,
+                "distributor_id": self.distributor.id,
+                "period_id": period.id,
+                "company_id": self.company_a.id,
+                "entitlement_quantity": 1,
+                "state": "approved",
+                "approved_by_id": self.manager.id,
+            })
+
     def test_invalid_slab_quantities_are_rejected(self):
         with self.assertRaises(ValidationError):
             self.env["gt.distributor.scheme.slab"].create({

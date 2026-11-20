@@ -16,6 +16,13 @@ class DistributorSchemeAudit(models.Model):
     event_date = fields.Datetime(required=True, default=fields.Datetime.now, index=True)
     evidence = fields.Json(required=True)
 
+    @api.model_create_multi
+    def create(self, vals_list):
+        for vals in vals_list:
+            vals["actor_id"] = self.env.user.id
+            vals["event_date"] = fields.Datetime.now()
+        return super().create(vals_list)
+
     @api.constrains("scheme_id", "claim_id", "company_id")
     def _check_company_relations(self):
         for rec in self:
