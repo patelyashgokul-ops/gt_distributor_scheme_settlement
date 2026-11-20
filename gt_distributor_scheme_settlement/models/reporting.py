@@ -179,7 +179,7 @@ class DistributorSchemeReportWizard(models.TransientModel):
         deliverable = outstanding if not blocked and claim.state in ("approved", "fulfillment_in_progress") else 0.0
         return {
             "report_type": report_type, "company_id": claim.company_id.id, "company_name": claim.company_id.display_name,
-            "scheme_state": claim.scheme_id.state, "claim_id": claim.id,
+            "claim_id": claim.id,
             "scheme_id": claim.scheme_id.id, "period_id": claim.period_id.id,
             "distributor_id": claim.distributor_id.id,
             "scheme_name": claim.scheme_id.name, "distributor_name": claim.distributor_id.display_name,
@@ -327,7 +327,6 @@ class DistributorSchemeReportLine(models.TransientModel):
     period_end = fields.Date(readonly=True)
     distributor_id = fields.Many2one("res.partner", readonly=True)
     scheme_name = fields.Char(readonly=True)
-    scheme_state = fields.Char(readonly=True)
     distributor_name = fields.Char(readonly=True)
     claim_reference = fields.Char(readonly=True)
     claim_state = fields.Char(readonly=True)
