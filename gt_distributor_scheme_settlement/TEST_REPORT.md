@@ -46,6 +46,56 @@ Final P02 command (PowerShell; isolated cluster and database only):
 
 Odoo reported `0 failed, 0 error(s) of 11 tests` in `.test/odoo-p02-rerun.log`. The disposable database, filestore, and temporary PostgreSQL cluster were removed/stopped after verification; logs remain under `.test`.
 
+## P03 implementation and verification
+
+### Implementation
+
+- Reworked `models/calculator.py` into a reusable, permission-checked read-only service. The P02 `calculate_entitlement(scheme_id, distributor_id, period_id)` entry point remains as a compatibility wrapper and preserves its earlier `qualified` / `below_threshold` status and review exception behavior.
+- Added `calculate_eligibility(scheme_id, distributor_id, date_start, date_end, as_of)`, explicit `ELIGIBLE` / `NOT_ELIGIBLE` / `BLOCKED` outcomes, scoped exception codes, deterministic sorted evidence, and a SHA-256 source fingerprint.
+- Added native `gt.distributor.scheme.preview.wizard`, form, scheme button, role ACLs, result tamper guard, and source evidence display. Preview does not create persistent claims, stock moves, or accounting entries.
+- The engine retains P02 commercial-partner matching. A test verifies that an invoice on a child contact resolves to its configured distributor company, matching P02 behavior.
+- Uses only `account.move` and `account.move.line` with company, commercial partner, `out_invoice`/`out_refund`, posted state, invoice date, and qualifying product scope. Sales orders and stock records are not purchase fallbacks. Odoo 20 source confirms `move_type`, `state`, `invoice_date`, `commercial_partner_id`, `reversed_entry_id`, `display_type`, `product_id`, `product_uom_id`, `quantity`, `price_subtotal`, `create_date`, and `write_date`.
+- Counts only `display_type == 'product'` qualifying lines with positive untaxed subtotal and positive quantity. Zero-value and fully discounted lines are retained as excluded evidence; negative value/quantity and incompatible UoMs block the preview.
+- Refunds are attributed through Odoo 20 `reversed_entry_id`. Only a one-to-one qualifying product line on the source invoice and credit note is accepted. Ambiguous multi-line attribution, unlinked in-period credit notes, over-refunds, and late changes after the selected cutoff are exposed as blocking exceptions; no line is guessed. Posted invoices reversing posted credit notes restore their attributed quantity when one-to-one linkage is available.
+- UoM compatibility uses Odoo 20's `_has_common_reference`; conversion calls `_compute_quantity(..., round=False)`. Aggregation uses `math.fsum` for invoice quantities, and comparisons use 12 decimal places so an input just below a slab boundary is not promoted by two-decimal rounding. Refunds use the same conversion path.
+- Source evidence includes company/distributor, move and line IDs, document type/state/date, source UoM/quantity, normalized quantity, untaxed line subtotal, create/write timestamps, origin and classification. Stable identity sorting feeds the fingerprint. No persistent snapshot is claimed.
+- Historical cutoff policy: current posted source rows are included only when their `create_date` and `write_date` are not later than the explicit cutoff. A relevant source written after it blocks the preview because Odoo does not preserve old line values. New backdated entries are therefore detected as a cutoff exception; a current-time preview includes them and changes the fingerprint. This is not a reconstruction of prior database states.
+- Odoo 20 source `odoo/sql_db.py` sets `ISOLATION_LEVEL_REPEATABLE_READ`; the calculator performs no commits or writes. Concurrent read consistency relies on that transaction snapshot, but no concurrent integration test was run.
+
+### Final test evidence
+
+| Check | Result | Evidence |
+|---|---|---|
+| Clean install, registry, wizard view and ACL load | PASS (Python 3.14.6 unsupported) | Fresh disposable database `gt_scheme_p03_test`; Odoo loaded the addon, new transient model, ACL rows, and preview XML. The initial full run then exposed test defects; the final module update run below passed. |
+| P01/P02 regression and P03 ORM suite | PASS (Python 3.14.6 unsupported) | Odoo final result: `0 failed, 0 error(s) of 27 tests`; module test statistics: 29 tests (Odoo framework accounting differs by two from the result summary). `.test/odoo-p03-rerun.log`. |
+| Python syntax / XML / manifest | PASS | 15 Python files parsed, 8 XML files parsed, manifest literal loaded using Python 3.14.6 after final source changes. |
+| P03 production Python support | NOT RUN | Only Python 3.14.6 was available; Odoo 20 source declares Python 3.12–3.13. |
+| Large-volume performance benchmark | NOT RUN | No 1,000-line or representative distributor-volume benchmark was executed. Final Odoo run reported 6,774 module-stat queries across tests, not a performance benchmark. |
+| Real concurrent preview/source-write test | NOT RUN | Repeatable-read behavior was verified in source; tests were sequential and do not establish concurrency behavior under parallel requests. |
+
+Final passing command (PowerShell; isolated UTF-8 PostgreSQL 18 cluster, port 55498; disposable DB and filestore only):
+
+```powershell
+& C:\PycharmProjects\odoo20\.venv\Scripts\python.exe C:\PycharmProjects\odoo20\odoo-20.0\odoo-bin --addons-path=C:\PycharmProjects\odoo20\odoo-20.0\odoo\addons,C:\PycharmProjects\odoo20\custom_addons --data-dir=C:\PycharmProjects\odoo20\custom_addons\gt_distributor_scheme_settlement\.test\odoo-data --db_host=127.0.0.1 --db_port=55498 --db_user=odoo_test --db_password= --database=gt_scheme_p03_test --update=gt_distributor_scheme_settlement --without-demo --test-enable --test-tags=/gt_distributor_scheme_settlement --stop-after-init --http-port=8095 --logfile=C:\PycharmProjects\odoo20\custom_addons\gt_distributor_scheme_settlement\.test\odoo-p03-rerun.log
+```
+
+### Acceptance matrix
+
+- **AC-11 posted invoice source only: PASS.** Actual ORM tests cover posted/draft invoices, posted/unposted credit notes, and vendor bills. The query also restricts the document type to `out_invoice` and state to `posted`; no sale order, purchase order, or stock source is searched.
+- **AC-12 customer, product, company and date matching: PASS.** Actual tests cover product and invoice-date filtering, same shared product in two companies, the other-company invoice exclusion, exact eligible distributor company partner through P02 commercial-partner matching, and child-contact identity behavior.
+- **AC-13 free and zero-value exclusion: PASS.** Actual test covers zero-price and fully discounted qualifying product lines and verifies only paid quantity contributes.
+- **AC-14 refund adjustments: PASS for supported attribution cases.** Actual tests cover linked partial/multiple/late refunds, unposted/unlinked/out-of-period refunds, ambiguous line attribution, credit notes exceeding original quantity, and an invoice reversing a credit note. Ambiguous product-line mappings block; they are not guessed.
+- **AC-15 UoM conversion and boundaries: PASS.** P02 regression test performs actual unit-to-dozen invoice/refund conversion; P03 tests incompatible UoM blocking and the exclusive slab boundary immediately below minimum without rounding up.
+- **AC-16 period and cutoff policy: PASS.** Scheme/request date containment, invoice-date filtering, explicit cutoff, late linked credit note, post-cutoff backdated source blocking, stable fingerprints, and changed-source fingerprints are covered. Historical prior line values are not reconstructed.
+
+### Remaining security and implementation limits
+
+- Preview requires scheme operator/manager membership **and** standard accounting read access to `account.move` and `account.move.line`; this intentionally does not bypass accounting ACLs. Production role setup must grant these rights where previews are needed.
+- The source search is scoped by company, commercial partner, document type, posted state, date, and product. A same-company wrong-distributor credit note or a different-company credit note is excluded by normal source visibility and cannot be used to reduce the entitlement. No source data is returned for records outside the request scope.
+- Account data has no historical line-version store. As-of behavior uses current `create_date`/`write_date` as conservative availability guards; relevant after-cutoff changes block. This avoids fabricated historical quantities but cannot reconstruct data overwritten before the first preview.
+- Performance with 1,000+ invoice lines, parallel preview calls, direct import vectors, and parallel accounting writes remain unverified. No settlement claim snapshot is persisted. Period closure/claim generation, immutable evidence, approval, fulfillment, post-approval adjustments, and financial settlement remain P04–P08 work.
+- P03 is not ready to publish; supported-Python testing and the deferred scale/concurrency checks are still required before a production release.
+
 ## Acceptance checks
 
 - **AC-01 fresh install and registry:** PASS (Python 3.14.6 unsupported) — module installed into a fresh disposable Odoo 20 database; registry loaded.

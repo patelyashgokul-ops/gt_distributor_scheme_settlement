@@ -2,7 +2,7 @@
 
 Odoo 20 Community addon by Golok Technology. Support: patelyash.gokul@gmail.com.
 
-The P01 foundation stores schemes, purchase slabs, periods, claims, source evidence, adjustments, and append-only audit records. P02 adds a permission-checked, non-persisted purchase calculation from posted invoices and linked refunds, including UoM conversion and highest-slab selection. It does not create claims, transition workflows, approve claims, create sales orders, reconcile deliveries, or settle claims.
+P01 provides the scheme, slab, period, claim, source, adjustment, audit, and company-security foundation. P02 added a non-persisting purchase calculator. P03 hardens it into a deterministic eligibility engine and adds an authorized read-only preview wizard over posted customer invoices and attributable credit notes. No phase in this module currently closes periods, generates or approves claims, creates sales orders, reconciles deliveries, or settles claims.
 
 ## Installation
 
@@ -11,7 +11,7 @@ Copy this directory into an Odoo 20 Community addons path, update the Apps list,
 The inspected Odoo 20 checkout declares Python 3.12–3.13 and PostgreSQL 16 minimum. Use a supported Python runtime and a disposable PostgreSQL database for automated tests. Run:
 
 ```powershell
-python odoo-bin --addons-path="<odoo-addons>,<custom-addons>" --data-dir="<disposable-data-dir>" --db_host=127.0.0.1 --db_port=<disposable-port> --db_user=<test-user> --db_password=<test-password> --database=gt_scheme_p02_test --init=gt_distributor_scheme_settlement --test-tags=/gt_distributor_scheme_settlement --stop-after-init --without-demo
+python odoo-bin --addons-path="<odoo-addons>,<custom-addons>" --data-dir="<disposable-data-dir>" --db_host=127.0.0.1 --db_port=<disposable-port> --db_user=<test-user> --db_password=<test-password> --database=gt_scheme_p03_test --init=gt_distributor_scheme_settlement --test-tags=/gt_distributor_scheme_settlement --stop-after-init --without-demo
 ```
 
 Do not point this command at production or shared databases. P01 and P02 test evidence and environment limitations are in `TEST_REPORT.md`.
@@ -22,15 +22,17 @@ Do not point this command at production or shared databases. P01 and P02 test ev
 - **Distributor Scheme Manager** can configure schemes, slabs, and periods, and manage claims. Workflow state transitions and approval/fulfillment metadata remain server-blocked until their workflows are implemented.
 - **Distributor Scheme Auditor** has read-only access within allowed companies.
 
+Eligibility preview uses the current active scheme company, accounting ACLs, and accounting record rules. Preview operators/managers need Odoo read access to customer invoices and invoice lines; the calculator never uses `sudo()` to obtain accounting data.
+
 Company scoped `ir.access` domain restrictions apply to every model (Odoo 20 combines permission and domain restrictions in this model). Related records also enforce company consistency at ORM level. Audit and adjustment evidence cannot be updated or deleted through normal ORM calls. Odoo superuser mode bypasses access controls by design; privileged custom code must preserve these invariants.
 
-## Remaining business contracts (P03–P08)
+## Remaining business contracts (P04–P08)
 
 These are design contracts, not implemented behavior. Future services must expose explicit success/failure results and be safe under direct ORM/RPC/import and concurrent invocation.
 
-1. **Eligibility and source evidence:** P02's calculator selects only same-company, same-distributor `out_invoice` and `out_refund` documents in `posted` state and within the requested period. It filters to the scheme qualifying product. Draft/cancelled documents are excluded. Unlinked refunds and refunds linked outside the period's eligible invoices raise review exceptions. Immutable persisted source snapshots remain future work.
+1. **Eligibility and source evidence:** P03 previews use only same-company, same-commercial-partner `out_invoice` and `out_refund` documents in `posted` state, on invoice date, for the scheme product. This deliberately preserves P02's commercial-partner identity rule; child contact invoices count for an eligible company distributor, and an ORM test covers it. Paid product lines with positive untaxed subtotal count; zero-value/free/fully discounted lines are excluded. Refunds require one unambiguous qualifying source line and source invoice line. Unlinked or out-of-period refunds are blocked for review. Every preview accepts an explicit timestamp cutoff and emits a SHA-256 fingerprint. Relevant documents/lines whose current `create_date` or `write_date` is later than the cutoff block historical reconstruction because Odoo does not retain prior line versions. Preview evidence is not persisted or immutable; snapshots remain P04 work.
 2. **Ownership and scope:** each claim is for exactly one scheme, scheme-specific period, distributor, and company. Every source invoice, refund, line, claim, adjustment, and fulfillment record must match that company and distributor. Reject cross-company, cross-distributor, out-of-period, or otherwise stale evidence.
-3. **Quantity policy:** convert invoice quantities into the scheme qualifying UoM using Odoo 20's UoM common-reference hierarchy and conversion API. Reject incompatible UoMs; do not compare raw quantities across units.
+3. **Quantity policy:** convert invoice quantities into the scheme qualifying UoM using Odoo 20's UoM common-reference hierarchy and conversion API. Reject incompatible UoMs; do not compare raw quantities across units. Conversion is unrounded per line, aggregate comparison uses 12 decimal places, and slab upper bounds are exclusive.
 4. **Slab policy:** apply only the single highest qualifying slab. A slab's minimum is inclusive and its optional upper boundary is exclusive. Overlapping slabs are invalid. Do not cumulate rewards from multiple slabs.
 5. **Period and claim policy:** period close must be idempotent and serialized against competing close runs. Create at most one claim per scheme, company, distributor, and period. Persist the exact calculation inputs and source evidence used.
 6. **Evidence immutability and adjustments:** persist an immutable snapshot of each qualifying posted invoice/refund line, including document identity, company, partner, dates, product, UoM, quantity, currency, amounts, and relevant links. Corrections append adjustment records; they never rewrite or erase source evidence. Late returns after period close must create an explicit exception and adjustment workflow.

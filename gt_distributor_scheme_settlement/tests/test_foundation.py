@@ -358,6 +358,23 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
         self.assertTrue(any(item["code"] == "LATE_REFUND" and item["severity"] == "WARNING" for item in result["exceptions"]))
         self.assertNotIn(first.id, {row["move_id"] for row in result["invoice_sources"]})
 
+    def test_posted_invoice_reversing_a_credit_note_restores_its_quantity(self):
+        self._basic_slab()
+        invoice = self._create_invoice_one_line(product_id=self.product_a, quantity=20,
+                                                invoice_date="2026-01-10", partner_id=self.distributor.id, post=True)
+        credit = self._create_invoice_one_line(move_type="out_refund", product_id=self.product_a, quantity=5,
+                                               invoice_date="2026-01-15", partner_id=self.distributor.id,
+                                               reversed_entry_id=invoice.id, post=True)
+        reversal = self._create_invoice_one_line(move_type="out_invoice", product_id=self.product_a, quantity=5,
+                                                 invoice_date="2026-01-20", partner_id=self.distributor.id,
+                                                 reversed_entry_id=credit.id, post=True)
+        result = self._preview()
+        self.assertEqual(result["calculation_status"], "ELIGIBLE")
+        self.assertEqual(result["gross_quantity"], 20)
+        self.assertEqual(result["refund_quantity"], 0)
+        self.assertEqual(result["net_quantity"], 20)
+        self.assertIn(reversal.id, {row["move_id"] for row in result["refund_sources"]})
+
     def test_unlinked_refund_is_a_blocking_preview_not_a_guess(self):
         self._basic_slab()
         self._create_invoice_one_line(product_id=self.product_a, quantity=10,
@@ -367,6 +384,17 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
         result = self._preview()
         self.assertEqual(result["calculation_status"], "BLOCKED")
         self.assertIn("UNATTRIBUTED_REFUND", {item["code"] for item in result["exceptions"]})
+
+    def test_attributed_credit_note_exceeding_original_quantity_blocks(self):
+        self._basic_slab()
+        invoice = self._create_invoice_one_line(product_id=self.product_a, quantity=5,
+                                                invoice_date="2026-01-10", partner_id=self.distributor.id, post=True)
+        self._create_invoice_one_line(move_type="out_refund", product_id=self.product_a, quantity=6,
+                                      invoice_date="2026-01-20", partner_id=self.distributor.id,
+                                      reversed_entry_id=invoice.id, post=True)
+        result = self._preview()
+        self.assertEqual(result["calculation_status"], "BLOCKED")
+        self.assertIn("REFUND_EXCEEDS_PURCHASE", {item["code"] for item in result["exceptions"]})
 
     def test_ambiguous_multi_line_refund_attribution_blocks(self):
         self._basic_slab()
