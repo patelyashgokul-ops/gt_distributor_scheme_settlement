@@ -140,6 +140,10 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
         })
         return scheme, period
 
+    def _close_p04(self, period):
+        period.with_user(self.manager).write({"calculation_cutoff": fields.Datetime.now()})
+        return period.with_user(self.manager).action_close_period()
+
     def test_required_model_fields(self):
         required = {
             "gt.distributor.scheme": {"name", "code", "company_id", "qualifying_product_id", "reward_product_id", "distributor_ids", "date_start", "date_end", "qualifying_uom_id"},
@@ -623,6 +627,222 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
             audit.with_user(self.manager).write({"event_type": "changed"})
         with self.assertRaises(AccessError):
             audit.with_user(self.manager).unlink()
+
+    def test_p04_close_generates_claim_snapshot_sources_and_audit(self):
+        scheme, period = self._p04_scheme_period()
+        invoice = self._create_invoice_one_line(
+            product_id=self.product_a, quantity=25, invoice_date="2026-01-10",
+            partner_id=self.distributor.id, post=True,
+        )
+        invoice_write_date = invoice.write_date
+        claims_before = self.env["gt.distributor.scheme.claim"].search_count([])
+        self._close_p04(period)
+        self.assertEqual(period.state, "closed")
+        self.assertEqual(period.generated_claim_count, 1)
+        self.assertEqual(period.eligible_distributor_count, 1)
+        self.assertEqual(period.source_count, 1)
+        claim = period.claim_ids
+        self.assertEqual(len(claim), 1)
+        self.assertEqual(claim.state, "draft")
+        self.assertEqual(claim.company_id, self.company_a)
+        self.assertEqual(claim.scheme_id, scheme)
+        self.assertEqual(claim.distributor_id, self.distributor)
+        self.assertEqual(claim.gross_quantity, 25)
+        self.assertEqual(claim.refund_quantity, 0)
+        self.assertEqual(claim.net_quantity, 25)
+        self.assertEqual(claim.reward_quantity, 1)
+        self.assertEqual(claim.entitlement_quantity, 1)
+        self.assertEqual(claim.snapshot_payload["period"]["start"], "2026-01-01")
+        self.assertEqual(claim.snapshot_payload["sources"][0]["invoice_line_id"], invoice.invoice_line_ids.id)
+        self.assertEqual(claim._hash_snapshot(claim.snapshot_payload), claim.snapshot_hash)
+        self.assertEqual(len(claim.source_ids), 1)
+        self.assertEqual(claim.source_ids.quantity, 25)
+        self.assertEqual(claim.source_ids.source_role, "invoice")
+        self.assertEqual(invoice.write_date, invoice_write_date)
+        self.assertEqual(self.env["account.move"].search_count([("company_id", "=", self.company_a.id)]), 1)
+        self.assertEqual(self.env["stock.picking"].search_count([("company_id", "=", self.company_a.id)]), 0)
+        self.assertEqual(self.env["gt.distributor.scheme.claim"].search_count([]), claims_before + 1)
+        events = self.env["gt.distributor.scheme.audit"].search([("scheme_id", "=", scheme.id)])
+        self.assertIn("period_closed", events.mapped("event_type"))
+        self.assertIn("claim_generated", events.mapped("event_type"))
+
+    def test_p04_noneligible_distributor_is_in_period_snapshot_without_claim(self):
+        _scheme, period = self._p04_scheme_period(code="P04-NONELIGIBLE")
+        self._close_p04(period)
+        self.assertEqual(period.state, "closed")
+        self.assertEqual(period.generated_claim_count, 0)
+        self.assertEqual(period.claim_ids, self.env["gt.distributor.scheme.claim"])
+        self.assertEqual(period.close_summary["distributors"][0]["calculation_status"], "NOT_ELIGIBLE")
+
+    def test_p04_blocked_calculation_rolls_back_period_close(self):
+        scheme, period = self._p04_scheme_period(code="P04-BLOCKED")
+        invoice = self._create_invoice_one_line(
+            product_id=self.product_a, quantity=10, invoice_date="2026-01-10",
+            partner_id=self.distributor.id, post=True,
+        )
+        self._create_invoice_one_line(
+            move_type="out_refund", product_id=self.product_a, quantity=2,
+            invoice_date="2026-01-20", partner_id=self.distributor.id, post=True,
+        )
+        with self.assertRaises(UserError):
+            self._close_p04(period)
+        self.assertEqual(period.state, "open")
+        self.assertFalse(period.closing_cutoff)
+        self.assertEqual(period.generated_claim_count, 0)
+        self.assertFalse(period.claim_ids)
+        self.assertEqual(self.env["gt.distributor.scheme.claim.source"].search_count([("scheme_id", "=", scheme.id)]), 0)
+        self.assertEqual(self.env["gt.distributor.scheme.audit"].search_count([
+            ("scheme_id", "=", scheme.id), ("event_type", "=", "period_closed")
+        ]), 0)
+
+    def test_p04_repeated_close_is_idempotent_and_period_is_immutable(self):
+        _scheme, period = self._p04_scheme_period(code="P04-IDEMPOTENT")
+        self._create_invoice_one_line(
+            product_id=self.product_a, quantity=10, invoice_date="2026-01-10",
+            partner_id=self.distributor.id, post=True,
+        )
+        result = self._close_p04(period)
+        claim_ids = period.claim_ids.ids
+        self.assertEqual(period.with_user(self.manager).action_close_period(), result)
+        self.assertEqual(period.claim_ids.ids, claim_ids)
+        with self.assertRaises(ValidationError):
+            period.write({"state": "open"})
+        with self.assertRaises(ValidationError):
+            period.write({"date_end": "2026-02-01"})
+        with self.assertRaises(UserError):
+            period.unlink()
+
+    def test_p04_period_requires_manager_explicit_past_cutoff_and_ended_period(self):
+        _scheme, period = self._p04_scheme_period(code="P04-AUTH")
+        with self.assertRaises(AccessError):
+            period.with_user(self.operator).action_close_period()
+        period.with_user(self.manager).write({"calculation_cutoff": False})
+        with self.assertRaises(ValidationError):
+            period.with_user(self.manager).action_close_period()
+        future_period = self.env["gt.distributor.scheme.period"].with_user(self.manager).create({
+            "name": "Future P04 Period", "scheme_id": period.scheme_id.id,
+            "date_start": "2026-12-01", "date_end": "2026-12-31",
+            "calculation_cutoff": fields.Datetime.now(),
+        })
+        with self.assertRaises(UserError):
+            future_period.with_user(self.manager).action_close_period()
+
+    def test_p04_direct_claim_creation_and_financial_writes_are_blocked(self):
+        scheme, period = self._p04_scheme_period(code="P04-CLAIM-GUARD")
+        with self.assertRaises(AccessError):
+            self.env["gt.distributor.scheme.claim"].with_user(self.manager).create({
+                "scheme_id": scheme.id, "period_id": period.id, "company_id": self.company_a.id,
+                "distributor_id": self.distributor.id, "entitlement_quantity": 1,
+                "state": "draft",
+            })
+        self._create_invoice_one_line(product_id=self.product_a, quantity=10, invoice_date="2026-01-10",
+                                      partner_id=self.distributor.id, post=True)
+        self._close_p04(period)
+        claim = period.claim_ids
+        with self.assertRaises(AccessError):
+            claim.write({"entitlement_quantity": 500})
+        with self.assertRaises(AccessError):
+            claim.write({"state": "approved"})
+        with self.assertRaises(UserError):
+            claim.copy()
+        with self.assertRaises(UserError):
+            claim.unlink()
+        with self.assertRaises(AccessError):
+            self.env["gt.distributor.scheme.audit"].with_user(self.manager).create({
+                "company_id": self.company_a.id, "scheme_id": scheme.id,
+                "event_type": "forged_period_close", "evidence": {"closed": True},
+            })
+
+    def test_p04_revalidation_current_then_submit_and_start_review(self):
+        _scheme, period = self._p04_scheme_period(code="P04-LIFECYCLE")
+        self._create_invoice_one_line(product_id=self.product_a, quantity=10, invoice_date="2026-01-10",
+                                      partner_id=self.distributor.id, post=True)
+        self._close_p04(period)
+        claim = period.claim_ids
+        validation = claim.with_user(self.manager).action_revalidate_sources()
+        self.assertEqual(validation["status"], "current")
+        self.assertEqual(claim.source_validation_status, "current")
+        self.assertTrue(claim.with_user(self.operator).action_submit())
+        self.assertEqual(claim.state, "submitted")
+        self.assertTrue(claim.with_user(self.manager).action_start_review())
+        self.assertEqual(claim.state, "under_review")
+        self.assertTrue(claim.submitted_at)
+        self.assertTrue(claim.reviewed_at)
+
+    def test_p04_new_backdated_invoice_marks_claim_stale_without_rewriting_snapshot(self):
+        scheme, period = self._p04_scheme_period(code="P04-STALE-NEW", slabs=((1, 100, 1), (100, False, 2)))
+        self._create_invoice_one_line(product_id=self.product_a, quantity=10, invoice_date="2026-01-10",
+                                      partner_id=self.distributor.id, post=True)
+        self._close_p04(period)
+        claim = period.claim_ids
+        old_hash, old_quantity, old_reward = claim.snapshot_hash, claim.net_quantity, claim.reward_quantity
+        self._create_invoice_one_line(product_id=self.product_a, quantity=100, invoice_date="2026-01-12",
+                                      partner_id=self.distributor.id, post=True)
+        validation = claim.with_user(self.manager).action_revalidate_sources()
+        self.assertEqual(validation["status"], "stale")
+        self.assertEqual(validation["change_category"], "source_changed_entitlement_changed")
+        self.assertEqual(validation["original"]["reward_quantity"], old_reward)
+        self.assertEqual(validation["current"]["reward_quantity"], 2)
+        self.assertEqual(claim.net_quantity, old_quantity)
+        self.assertEqual(claim.snapshot_hash, old_hash)
+        response = claim.with_user(self.operator).action_submit()
+        self.assertEqual(response["type"], "ir.actions.client")
+        self.assertEqual(claim.state, "draft")
+        self.assertEqual(claim.source_validation_status, "stale")
+        self.assertEqual(claim.scheme_id, scheme)
+
+    def test_p04_source_change_without_reward_change_is_classified(self):
+        _scheme, period = self._p04_scheme_period(code="P04-STALE-SAME")
+        self._create_invoice_one_line(product_id=self.product_a, quantity=10, invoice_date="2026-01-10",
+                                      partner_id=self.distributor.id, post=True)
+        self._close_p04(period)
+        claim = period.claim_ids
+        self._create_invoice_one_line(product_id=self.product_a, quantity=1, invoice_date="2026-01-11",
+                                      partner_id=self.distributor.id, post=True)
+        validation = claim.with_user(self.manager).action_revalidate_sources()
+        self.assertEqual(validation["status"], "stale")
+        self.assertEqual(validation["change_category"], "source_changed_entitlement_unchanged")
+        self.assertEqual(validation["original"]["reward_quantity"], validation["current"]["reward_quantity"])
+
+    def test_p04_late_refund_marks_original_claim_stale_and_blocked_refund_is_reported(self):
+        _scheme, period = self._p04_scheme_period(code="P04-STALE-REFUND")
+        invoice = self._create_invoice_one_line(product_id=self.product_a, quantity=10,
+                                                invoice_date="2026-01-10", partner_id=self.distributor.id, post=True)
+        self._close_p04(period)
+        claim = period.claim_ids
+        self._create_invoice_one_line(move_type="out_refund", product_id=self.product_a, quantity=2,
+                                      invoice_date="2026-02-05", partner_id=self.distributor.id,
+                                      reversed_entry_id=invoice.id, post=True)
+        validation = claim.with_user(self.manager).action_revalidate_sources()
+        self.assertEqual(validation["status"], "stale")
+        self.assertEqual(validation["current"]["refund_quantity"], 2)
+        self.assertEqual(claim.refund_quantity, 0)
+
+    def test_p04_duplicate_cross_scheme_source_allocation_is_rejected(self):
+        _scheme_a, period_a = self._p04_scheme_period(code="P04-ALLOC-A")
+        _scheme_b, period_b = self._p04_scheme_period(code="P04-ALLOC-B")
+        self._create_invoice_one_line(product_id=self.product_a, quantity=10, invoice_date="2026-01-10",
+                                      partner_id=self.distributor.id, post=True)
+        self._close_p04(period_a)
+        with self.assertRaises(UserError):
+            period_b.with_user(self.manager).action_close_period()
+        self.assertEqual(period_b.state, "open")
+        self.assertEqual(period_b.claim_ids, self.env["gt.distributor.scheme.claim"])
+
+    def test_p04_snapshot_payload_detects_tampering_and_source_rows_are_immutable(self):
+        _scheme, period = self._p04_scheme_period(code="P04-SNAPSHOT-GUARD")
+        self._create_invoice_one_line(product_id=self.product_a, quantity=10, invoice_date="2026-01-10",
+                                      partner_id=self.distributor.id, post=True)
+        self._close_p04(period)
+        claim = period.claim_ids
+        source = claim.source_ids
+        with self.assertRaises(AccessError):
+            claim.write({"snapshot_payload": {"tampered": True}})
+        with self.assertRaises(AccessError):
+            source.write({"quantity": 999})
+        with self.assertRaises(AccessError):
+            source.unlink()
+        self.assertTrue(claim._check_snapshot_integrity())
 
     def test_xml_views_and_menu_references_load(self):
         refs = [
