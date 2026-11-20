@@ -155,6 +155,162 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
         period.with_user(self.manager).write({"calculation_cutoff": fields.Datetime.now()})
         return period.with_user(self.manager).action_close_period()
 
+    def _p05_reviewable_claim(self, code="P05-CLAIM"):
+        _scheme, period = self._p04_scheme_period(code=code)
+        self._create_invoice_one_line(product_id=self.product_a, quantity=10,
+                                      invoice_date="2026-01-10", partner_id=self.distributor.id, post=True)
+        self._close_p04(period)
+        claim = period.claim_ids
+        claim.with_user(self.operator).action_submit()
+        claim.with_user(self.manager).action_start_review()
+        return claim
+
+    def test_p05_manager_approves_current_claim_and_freezes_entitlement(self):
+        claim = self._p05_reviewable_claim("P05-APPROVE")
+        picking_count = self.env["stock.picking"].search_count([])
+        sale_count = self.env["sale.order"].search_count([])
+        move_count = self.env["account.move"].search_count([])
+        self.assertTrue(claim.with_user(self.independent_manager).action_approve_claim("Verified against posted sources."))
+        self.assertEqual(claim.state, "approved")
+        self.assertEqual(claim.approved_by_id, self.independent_manager)
+        self.assertEqual(claim.approved_net_quantity, 10)
+        self.assertEqual(claim.approved_reward_quantity, claim.reward_quantity)
+        self.assertEqual(claim.approved_snapshot_fingerprint, claim.snapshot_hash)
+        self.assertEqual(claim._hash_snapshot(claim.approval_evidence), claim.approval_evidence_hash)
+        self.assertEqual(claim.approval_evidence["approved_by_id"], self.independent_manager.id)
+        self.assertEqual(self.env["stock.picking"].search_count([]), picking_count)
+        self.assertEqual(self.env["sale.order"].search_count([]), sale_count)
+        self.assertEqual(self.env["account.move"].search_count([]), move_count)
+        self.assertEqual(self.env["gt.distributor.scheme.audit"].search_count([
+            ("claim_id", "=", claim.id), ("event_type", "=", "claim_approved"),
+        ]), 1)
+
+    def test_p05_creator_and_submitter_cannot_self_approve(self):
+        claim = self._p05_reviewable_claim("P05-SELF-APPROVE")
+        with self.assertRaises(AccessError):
+            claim.with_user(self.manager).action_approve_claim()
+        with self.assertRaises(AccessError):
+            claim.with_user(self.operator).action_approve_claim()
+        self.assertEqual(claim.state, "under_review")
+        self.assertFalse(claim.approved_by_id)
+
+    def test_p05_nonmanager_cannot_approve(self):
+        claim = self._p05_reviewable_claim("P05-NONMANAGER")
+        with self.assertRaises(AccessError):
+            claim.with_user(self.operator).action_approve_claim()
+
+    def test_p05_stale_source_blocks_approval_even_when_reward_is_unchanged(self):
+        claim = self._p05_reviewable_claim("P05-STALE-SOURCE")
+        original_hash = claim.snapshot_hash
+        self._create_invoice_one_line(product_id=self.product_a, quantity=1,
+                                      invoice_date="2026-01-11", partner_id=self.distributor.id, post=True)
+        result = claim.with_user(self.independent_manager).action_approve_claim()
+        self.assertEqual(result["tag"], "display_notification")
+        self.assertEqual(claim.state, "under_review")
+        self.assertEqual(claim.source_validation_status, "stale")
+        self.assertEqual(claim.source_change_category, "source_changed_entitlement_unchanged")
+        self.assertEqual(claim.snapshot_hash, original_hash)
+        self.assertFalse(claim.approved_by_id)
+
+    def test_p05_changed_entitlement_blocks_approval(self):
+        claim = self._p05_reviewable_claim("P05-STALE-ENTITLEMENT")
+        self._create_invoice_one_line(product_id=self.product_a, quantity=25,
+                                      invoice_date="2026-01-12", partner_id=self.distributor.id, post=True)
+        claim.with_user(self.independent_manager).action_approve_claim()
+        self.assertEqual(claim.state, "under_review")
+        self.assertEqual(claim.source_validation_status, "stale")
+        self.assertEqual(claim.source_change_category, "source_changed_entitlement_changed")
+        self.assertFalse(claim.approved_by_id)
+
+    def test_p05_direct_approval_fields_and_state_are_protected(self):
+        claim = self._p05_reviewable_claim("P05-DIRECT-WRITE")
+        for values in (
+            {"state": "approved"},
+            {"approved_by_id": self.independent_manager.id},
+            {"approved_reward_quantity": 900},
+            {"approval_evidence_hash": "forged"},
+        ):
+            with self.assertRaises(AccessError):
+                claim.with_user(self.independent_manager).write(values)
+        with self.assertRaises(AccessError):
+            self.env["gt.distributor.scheme.claim"].with_user(self.independent_manager).create({
+                "state": "approved", "scheme_id": claim.scheme_id.id,
+            })
+
+    def test_p05_rejection_requires_reason_and_preserves_history(self):
+        claim = self._p05_reviewable_claim("P05-REJECT")
+        original_hash = claim.snapshot_hash
+        with self.assertRaises(ValidationError):
+            claim.with_user(self.independent_manager).action_reject_claim("no")
+        self.assertTrue(claim.with_user(self.independent_manager).action_reject_claim("Distributor documents do not match."))
+        self.assertEqual(claim.state, "rejected")
+        self.assertEqual(claim.rejected_by_id, self.independent_manager)
+        self.assertTrue(claim.rejected_at)
+        self.assertEqual(claim.rejection_reason, "Distributor documents do not match.")
+        self.assertEqual(claim.snapshot_hash, original_hash)
+        with self.assertRaises(UserError):
+            claim.with_user(self.independent_manager).action_approve_claim()
+        with self.assertRaises(UserError):
+            claim.unlink()
+
+    def test_p05_approved_claim_evidence_cannot_be_modified_or_copied(self):
+        claim = self._p05_reviewable_claim("P05-APPROVED-IMMUTABLE")
+        claim.with_user(self.independent_manager).action_approve_claim()
+        with self.assertRaises(AccessError):
+            claim.write({"approved_reward_quantity": 999})
+        with self.assertRaises(UserError):
+            claim.copy()
+        with self.assertRaises(UserError):
+            claim.unlink()
+
+    def test_p05_revision_preserves_original_and_approves_new_snapshot(self):
+        claim = self._p05_reviewable_claim("P05-REVISION")
+        original_hash = claim.snapshot_hash
+        original_quantity = claim.net_quantity
+        self._create_invoice_one_line(product_id=self.product_a, quantity=20,
+                                      invoice_date="2026-01-12", partner_id=self.distributor.id, post=True)
+        claim.with_user(self.manager).action_revalidate_sources()
+        self.assertEqual(claim.source_validation_status, "stale")
+        with self.assertRaises(ValidationError):
+            claim.with_user(self.operator).action_request_revision("bad")
+        claim.with_user(self.operator).action_request_revision("Include newly posted backdated invoice.")
+        revision = claim.active_revision_id
+        self.assertTrue(revision)
+        self.assertEqual(revision.revision_number, 1)
+        self.assertEqual(revision.requested_by_id, self.operator)
+        self.assertEqual(revision.prepared_by_id, self.operator)
+        self.assertEqual(revision.net_quantity, 30)
+        self.assertEqual(revision.source_validation_status, "current")
+        self.assertEqual(claim.snapshot_hash, original_hash)
+        self.assertEqual(claim.net_quantity, original_quantity)
+        self.assertEqual(claim.state, "submitted")
+        with self.assertRaises(AccessError):
+            claim.with_user(self.operator).action_approve_claim()
+        claim.with_user(self.manager).action_start_review()
+        claim.with_user(self.independent_manager).action_approve_claim("Revision evidence verified.")
+        self.assertEqual(claim.state, "approved")
+        self.assertEqual(claim.approved_revision_id, revision)
+        self.assertEqual(claim.approved_net_quantity, 30)
+        self.assertEqual(revision.state, "approved")
+        self.assertEqual(claim.snapshot_hash, original_hash)
+        self.assertEqual(len(claim.source_ids), 2)
+        self.assertEqual(len(claim.source_ids.filtered("revision_id")), 1)
+
+    def test_p05_revision_records_are_immutable(self):
+        claim = self._p05_reviewable_claim("P05-REVISION-IMMUTABLE")
+        self._create_invoice_one_line(product_id=self.product_a, quantity=3,
+                                      invoice_date="2026-01-13", partner_id=self.distributor.id, post=True)
+        claim.with_user(self.operator).action_request_revision("Add omitted invoice source.")
+        revision = claim.active_revision_id
+        with self.assertRaises(AccessError):
+            revision.write({"reward_quantity": 500})
+        with self.assertRaises(AccessError):
+            revision.unlink()
+        with self.assertRaises(AccessError):
+            self.env["gt.distributor.scheme.claim.revision"].with_user(self.independent_manager).create({
+                "name": "Forged", "claim_id": claim.id, "revision_number": 99,
+            })
+
     def test_required_model_fields(self):
         required = {
             "gt.distributor.scheme": {"name", "code", "company_id", "qualifying_product_id", "reward_product_id", "distributor_ids", "date_start", "date_end", "qualifying_uom_id"},
