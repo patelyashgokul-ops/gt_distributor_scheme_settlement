@@ -15,6 +15,9 @@
                 <field name="reward_quantity"/>
                 <field name="state" widget="badge"/>
                 <field name="source_validation_status" widget="badge"/>
+                <field name="approved_reward_quantity" optional="hide"/>
+                <field name="approved_by_id" optional="hide"/>
+                <field name="approved_at" optional="hide"/>
             </list>
         </field>
     </record>
@@ -30,6 +33,16 @@
                     <button name="action_start_review" type="object" string="Start Review" class="btn-primary"
                             groups="gt_distributor_scheme_settlement.group_scheme_manager" invisible="state != 'submitted'"/>
                     <button name="action_revalidate_sources" type="object" string="Revalidate Sources"
+                            groups="gt_distributor_scheme_settlement.group_scheme_operator,gt_distributor_scheme_settlement.group_scheme_manager"
+                            invisible="state in ['approved', 'rejected', 'fulfilled', 'settled', 'cancelled']"/>
+                    <button name="action_open_claim_decision_wizard" type="object" string="Approve"
+                            context="{'default_decision': 'approve'}" class="btn-primary"
+                            groups="gt_distributor_scheme_settlement.group_scheme_manager" invisible="state != 'under_review'"/>
+                    <button name="action_open_claim_decision_wizard" type="object" string="Reject"
+                            context="{'default_decision': 'reject'}"
+                            groups="gt_distributor_scheme_settlement.group_scheme_manager" invisible="state != 'under_review'"/>
+                    <button name="action_open_claim_decision_wizard" type="object" string="Request Revision"
+                            context="{'default_decision': 'revise'}"
                             groups="gt_distributor_scheme_settlement.group_scheme_operator,gt_distributor_scheme_settlement.group_scheme_manager"
                             invisible="state in ['approved', 'rejected', 'fulfilled', 'settled', 'cancelled']"/>
                     <field name="state" widget="statusbar" statusbar_visible="draft,submitted,under_review,approved,rejected,fulfilled,settled" readonly="1"/>
@@ -130,6 +143,52 @@
                                 <field name="calculation_fingerprint"/>
                             </group>
                         </page>
+                        <page string="Revisions">
+                            <field name="active_revision_id" readonly="1"/>
+                            <field name="revision_ids" readonly="1">
+                                <list create="0" edit="0" delete="0">
+                                    <field name="revision_number"/>
+                                    <field name="name"/>
+                                    <field name="state" widget="badge"/>
+                                    <field name="requested_by_id"/>
+                                    <field name="prepared_by_id"/>
+                                    <field name="reason"/>
+                                    <field name="net_quantity"/>
+                                    <field name="reward_product_id"/>
+                                    <field name="reward_quantity"/>
+                                    <field name="source_validation_status" widget="badge"/>
+                                    <field name="snapshot_hash" optional="hide"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Approval Evidence">
+                            <group>
+                                <group string="Decision">
+                                    <field name="approved_by_id"/>
+                                    <field name="approved_at"/>
+                                    <field name="decision_note"/>
+                                    <field name="rejected_by_id"/>
+                                    <field name="rejected_at"/>
+                                    <field name="rejection_reason"/>
+                                    <field name="approved_revision_id"/>
+                                </group>
+                                <group string="Frozen Entitlement">
+                                    <field name="approved_gross_quantity"/>
+                                    <field name="approved_refund_quantity"/>
+                                    <field name="approved_net_quantity"/>
+                                    <field name="approved_slab_id"/>
+                                    <field name="approved_reward_product_id"/>
+                                    <field name="approved_reward_uom_id"/>
+                                    <field name="approved_reward_quantity"/>
+                                </group>
+                            </group>
+                            <group string="Integrity Evidence">
+                                <field name="approved_source_fingerprint"/>
+                                <field name="approved_snapshot_fingerprint"/>
+                                <field name="approval_evidence_hash"/>
+                                <field name="approval_evidence" widget="text"/>
+                            </group>
+                        </page>
                         <page string="Audit History">
                             <field name="audit_ids" readonly="1">
                                 <list create="0" edit="0" delete="0">
@@ -150,10 +209,9 @@
                                 </list>
                             </field>
                         </page>
-                        <page string="Future Approval and Fulfillment" groups="gt_distributor_scheme_settlement.group_scheme_manager">
-                            <group string="Approval Placeholder"><field name="approved_by_id"/><field name="approved_at"/></group>
+                        <page string="Fulfillment (P06)" groups="gt_distributor_scheme_settlement.group_scheme_manager">
                             <group string="Fulfillment Placeholder"><field name="fulfillment_order_id"/><field name="fulfillment_picking_ids" widget="many2many_tags"/></group>
-                            <p class="text-muted">Approval and stock fulfillment are not implemented in P04.</p>
+                            <p class="text-muted">Approval freezes the entitlement but does not create sales orders, stock transfers, or deliveries. Fulfillment will be handled in P06.</p>
                         </page>
                     </notebook>
                     <p class="text-muted">A draft claim contains a protected eligibility snapshot. Submission and review do not approve the entitlement or issue free goods.</p>

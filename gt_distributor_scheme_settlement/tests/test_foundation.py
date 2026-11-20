@@ -84,6 +84,17 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
                 cls.env.ref("account.group_account_readonly").id,
             ])],
         })
+        cls.independent_manager = cls.env["res.users"].create({
+            "name": "Scheme Test Independent Approver",
+            "login": "scheme-foundation-independent-approver",
+            "company_id": cls.company_a.id,
+            "company_ids": [(6, 0, [cls.company_a.id])],
+            "group_ids": [(6, 0, [
+                cls.env.ref("base.group_user").id,
+                cls.env.ref("gt_distributor_scheme_settlement.group_scheme_manager").id,
+                cls.env.ref("account.group_account_readonly").id,
+            ])],
+        })
         cls.internal_user = cls.env["res.users"].create({
             "name": "Scheme Test Unassigned User",
             "login": "scheme-foundation-unassigned",
