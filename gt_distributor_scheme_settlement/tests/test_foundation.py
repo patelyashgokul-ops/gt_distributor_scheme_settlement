@@ -406,23 +406,18 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
         self.env["stock.quant"]._update_available_quantity(
             claim.approved_reward_product_id, warehouse.lot_stock_id, 5
         )
-        processed = self.env["stock.picking"]
-        for _step in range(4):
-            pending = order.picking_ids.filtered(lambda picking: picking.state not in ("done", "cancel")) - processed
-            if not pending:
-                break
-            pending = pending.sorted(lambda picking: (picking.picking_type_id.sequence, picking.id))
-            picking = pending[0]
+        for operation_type in (warehouse.pick_type_id, warehouse.pack_type_id, warehouse.out_type_id):
+            picking = order.picking_ids.filtered(lambda item: item.picking_type_id == operation_type)
+            self.assertTrue(picking, f"Missing expected {operation_type.name} transfer")
             picking.action_assign()
-            self.assertEqual(picking.state, "assigned", f"Picking {picking.name} did not become ready")
+            self.assertTrue(all(item.state == "assigned" for item in picking))
             picking.move_ids.write({"quantity": 5, "picked": True})
             picking.button_validate()
-            processed |= picking
             claim.invalidate_recordset()
-            if picking.picking_type_code == "internal":
+            if operation_type != warehouse.out_type_id:
                 self.assertEqual(claim.fulfilled_quantity, 0)
                 self.assertEqual(claim.outstanding_quantity, 5)
-        outgoing = order.picking_ids.filtered(lambda picking: picking.picking_type_code == "outgoing" and picking.state == "done")
+        outgoing = order.picking_ids.filtered(lambda picking: picking.picking_type_id == warehouse.out_type_id and picking.state == "done")
         self.assertTrue(outgoing)
         claim.invalidate_recordset()
         self.assertEqual(claim.fulfilled_quantity, 5)
