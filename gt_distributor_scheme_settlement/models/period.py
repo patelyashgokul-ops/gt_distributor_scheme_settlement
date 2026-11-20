@@ -153,24 +153,29 @@ class DistributorSchemePeriod(models.Model):
             raise ValidationError(_("Enter an explicit calculation cutoff before closing this period."))
         if cutoff > fields.Datetime.now():
             raise ValidationError(_("The calculation cutoff cannot be in the future."))
-        with self.env.cr.savepoint():
-            self.env.cr.execute("SELECT id FROM gt_distributor_scheme_period WHERE id = %s FOR UPDATE", [self.id])
-            self.invalidate_recordset()
-            if self.state == "closed":
-                # Idempotent retries return the existing protected result.
-                return self._claims_action()
-            self._validate_close_boundary(cutoff)
-            try:
-                with self.env.cr.savepoint():
-                    return self._close_locked(cutoff)
-            except IntegrityError as error:
-                if error.pgcode == errorcodes.UNIQUE_VIOLATION:
-                    raise UserError(_("A claim or source line was allocated by a concurrent operation. No partial period close was committed.")) from error
-                raise
-            except Exception as error:
-                if error.__class__.__name__ == "SerializationFailure":
-                    raise UserError(_("A concurrent period or accounting update interrupted closing. No claims were committed; retry after the other transaction finishes.")) from error
-                raise
+        try:
+            with self.env.cr.savepoint():
+                self.env.cr.execute("SELECT id FROM gt_distributor_scheme_period WHERE id = %s FOR UPDATE", [self.id])
+                self.invalidate_recordset()
+                if self.state == "closed":
+                    # Idempotent retries return the existing protected result.
+                    return self._claims_action()
+                self._validate_close_boundary(cutoff)
+                try:
+                    with self.env.cr.savepoint():
+                        return self._close_locked(cutoff)
+                except IntegrityError as error:
+                    if error.pgcode == errorcodes.UNIQUE_VIOLATION:
+                        raise UserError(_("A claim or source line was allocated by a concurrent operation. No partial period close was committed.")) from error
+                    raise
+                except Exception as error:
+                    if error.__class__.__name__ == "SerializationFailure":
+                        raise UserError(_("A concurrent period or accounting update interrupted closing. No claims were committed; retry after the other transaction finishes.")) from error
+                    raise
+        except Exception as error:
+            if error.__class__.__name__ == "SerializationFailure":
+                raise UserError(_("Another transaction closed or changed this period. No duplicate claims were committed; retry to view the completed period.")) from error
+            raise
 
     def _validate_close_boundary(self, cutoff):
         self.ensure_one()
