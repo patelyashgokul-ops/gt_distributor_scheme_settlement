@@ -127,8 +127,13 @@ class DistributorSchemeCalculator(models.AbstractModel):
                 continue
             if not self._source_is_available_at_cutoff(refund, cutoff, exceptions):
                 continue
-            origin_lines = [line for line, qty in eligible_invoice_lines.get(origin.id, [])]
-            if len(origin_lines) != 1 or len(refund_product_lines) != 1:
+            origin_lines = origin.line_ids.filtered(
+                lambda line: line.display_type == "product" and line.product_id == scheme.qualifying_product_id
+            ).sorted("id")
+            eligible_origin_lines = [line for line, qty in eligible_invoice_lines.get(origin.id, [])]
+            if not eligible_origin_lines:
+                continue
+            if len(origin_lines) != 1 or len(refund_product_lines) != 1 or origin_lines[0] != eligible_origin_lines[0]:
                 self._exception(exceptions, "AMBIGUOUS_REFUND_LINE_ATTRIBUTION", "BLOCKING", _(
                     "A credit note contains multiple qualifying lines or its source invoice has multiple qualifying lines; line attribution is unresolved."
                 ))
@@ -145,7 +150,7 @@ class DistributorSchemeCalculator(models.AbstractModel):
             quantity = self._normalize_purchase_quantity(refund_line, scheme, exceptions)
             if quantity is None:
                 continue
-            origin_line = origin_lines[0]
+            origin_line = eligible_origin_lines[0]
             refund_totals_by_invoice_line[origin_line.id] += quantity
             if float_compare(refund_totals_by_invoice_line[origin_line.id],
                              eligible_invoice_lines[origin.id][0][1], precision_digits=self._quantity_precision()) > 0:
@@ -163,7 +168,7 @@ class DistributorSchemeCalculator(models.AbstractModel):
         # A later customer invoice that reverses an eligible credit note cancels
         # that deduction. Only a one-to-one product-line reversal is defensible.
         refund_quantity = self._apply_refund_reversals(
-            moves, common, product_domain, invoices, eligible_invoice_lines,
+            scheme, moves, common, product_domain, invoices, eligible_invoice_lines,
             refunds, refund_evidence, refund_quantity, cutoff, exceptions,
         )
 
@@ -176,6 +181,10 @@ class DistributorSchemeCalculator(models.AbstractModel):
                 "Attributed posted refunds exceed the eligible purchase quantity. Review the source documents."
             ))
         slab = self._select_highest_slab(scheme, max(net, 0.0))
+        if not scheme.slab_ids:
+            self._exception(exceptions, "NO_SLAB_CONFIGURATION", "BLOCKING", _(
+                "The scheme has no purchase slabs configured; eligibility cannot be determined."
+            ))
         blocking = any(item["severity"] == "BLOCKING" for item in exceptions)
         status = "BLOCKED" if blocking else "ELIGIBLE" if slab else "NOT_ELIGIBLE"
         canonical_sources = sorted(invoice_evidence + refund_evidence, key=self._source_sort_key)
@@ -348,7 +357,7 @@ class DistributorSchemeCalculator(models.AbstractModel):
         return quantity
 
     @api.model
-    def _apply_refund_reversals(self, moves, common, product_domain, invoices,
+    def _apply_refund_reversals(self, scheme, moves, common, product_domain, invoices,
                                 eligible_invoice_lines, refunds, refund_evidence,
                                 refund_quantity, cutoff, exceptions):
         refund_ids = refunds.ids
@@ -372,12 +381,14 @@ class DistributorSchemeCalculator(models.AbstractModel):
                 ))
                 continue
             lines = move.line_ids.filtered(
-                lambda line: line.display_type == "product" and line.product_id == origin_invoice.line_ids.filtered(lambda l: l.display_type == "product" and l.product_id == line.product_id)[:1].product_id
+                lambda line: line.display_type == "product" and line.product_id == scheme.qualifying_product_id
             )
             credit_lines = origin_refund.line_ids.filtered(
-                lambda line: line.display_type == "product" and line.product_id == origin_invoice.line_ids.filtered(lambda l: l.display_type == "product" and l.product_id == line.product_id)[:1].product_id
+                lambda line: line.display_type == "product" and line.product_id == scheme.qualifying_product_id
             )
-            original_lines = [line for line, qty in eligible_invoice_lines[origin_invoice.id]]
+            original_lines = origin_invoice.line_ids.filtered(
+                lambda line: line.display_type == "product" and line.product_id == scheme.qualifying_product_id
+            )
             if len(original_lines) != 1 or len(lines) != 1 or len(credit_lines) != 1:
                 self._exception(exceptions, "CREDIT_NOTE_REVERSAL_LINE_AMBIGUOUS", "BLOCKING", _(
                     "A credit note reversal cannot be attributed one-to-one to its qualifying purchase line."
@@ -394,11 +405,12 @@ class DistributorSchemeCalculator(models.AbstractModel):
                 continue
             if self._classify_product_line(reverse_line, exceptions) != "QUALIFYING":
                 continue
-            quantity = self._normalize_purchase_quantity(reverse_line, self.env["gt.distributor.scheme"].browse(refund_evidence[0]["scheme_id"]) if refund_evidence and "scheme_id" in refund_evidence[0] else self.env["gt.distributor.scheme"], exceptions)
-            # Scheme data is supplied separately below; this branch is intentionally
-            # replaced by a direct scheme-aware helper in the main calculation.
+            quantity = self._normalize_purchase_quantity(reverse_line, scheme, exceptions)
             if quantity is not None:
                 refund_quantity -= quantity
+                refund_evidence.append(self._build_line_evidence(
+                    move, reverse_line, -quantity, "CREDIT_NOTE_REVERSAL", origin=origin_refund
+                ))
         return refund_quantity
 
     @api.model

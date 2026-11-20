@@ -20,6 +20,9 @@
         <field name="model">gt.distributor.scheme</field>
         <field name="arch" type="xml">
             <form string="Distributor Scheme">
+                <header>
+                    <button name="action_open_eligibility_preview" type="object" string="Preview Purchase Eligibility" class="oe_highlight" groups="gt_distributor_scheme_settlement.group_scheme_operator,gt_distributor_scheme_settlement.group_scheme_manager"/>
+                </header>
                 <sheet>
                     <div class="oe_title"><label for="name"/><h1><field name="name" placeholder="e.g. Summer Distributor Offer"/></h1></div>
                     <group>

@@ -1,5 +1,5 @@
 from odoo import api, fields, models, _
-from odoo.exceptions import ValidationError
+from odoo.exceptions import AccessError, ValidationError
 
 
 class DistributorScheme(models.Model):
@@ -55,3 +55,27 @@ class DistributorScheme(models.Model):
         if "state" in vals and any(record.state != vals["state"] for record in self):
             raise ValidationError(_("Scheme lifecycle changes are reserved for a later workflow release."))
         return super().write(vals)
+
+    def action_open_eligibility_preview(self):
+        if not any(self.env.user.has_group(group) for group in (
+            "gt_distributor_scheme_settlement.group_scheme_operator",
+            "gt_distributor_scheme_settlement.group_scheme_manager",
+        )):
+            raise AccessError(_("You are not authorized to preview scheme eligibility."))
+        self.ensure_one()
+        self.check_access("read")
+        if self.company_id != self.env.company or self.company_id not in self.env.companies:
+            raise AccessError(_("Switch to the scheme company before opening its eligibility preview."))
+        return {
+            "type": "ir.actions.act_window",
+            "name": _("Preview Purchase Eligibility"),
+            "res_model": "gt.distributor.scheme.preview.wizard",
+            "view_mode": "form",
+            "views": [(self.env.ref("gt_distributor_scheme_settlement.view_scheme_preview_wizard_form").id, "form")],
+            "target": "new",
+            "context": {
+                "default_scheme_id": self.id,
+                "default_date_start": self.date_start,
+                "default_date_end": self.date_end,
+            },
+        }

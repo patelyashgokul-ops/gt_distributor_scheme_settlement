@@ -27,3 +27,5 @@ access_audit_company,Distributor scheme audit: allowed companies,gt.distributor.
 access_audit_operator,audit operator,gt.distributor.scheme.audit,gt_distributor_scheme_settlement.group_scheme_operator,r,
 access_audit_manager,audit manager,gt.distributor.scheme.audit,gt_distributor_scheme_settlement.group_scheme_manager,cr,
 access_audit_auditor,audit auditor,gt.distributor.scheme.audit,gt_distributor_scheme_settlement.group_scheme_auditor,r,
+access_preview_operator,scheme preview operator,gt.distributor.scheme.preview.wizard,gt_distributor_scheme_settlement.group_scheme_operator,cru,
+access_preview_manager,scheme preview manager,gt.distributor.scheme.preview.wizard,gt_distributor_scheme_settlement.group_scheme_manager,cru,

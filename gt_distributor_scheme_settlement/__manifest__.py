@@ -1,7 +1,7 @@
 {
     "name": "Distributor Scheme Settlement",
     "summary": "Manage distributor purchase schemes and settlement evidence",
-    "version": "20.0.2.0.0",
+    "version": "20.0.3.0.0",
     "category": "Sales/Sales",
     "author": "Golok Technology",
     "maintainer": "Golok Technology",
@@ -16,6 +16,7 @@
         "views/slab_views.xml",
         "views/period_views.xml",
         "views/claim_views.xml",
+        "views/eligibility_preview_views.xml",
         "views/menus.xml",
     ],
     "installable": True,
