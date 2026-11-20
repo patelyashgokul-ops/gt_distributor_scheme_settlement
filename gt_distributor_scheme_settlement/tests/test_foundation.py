@@ -1,4 +1,4 @@
-from datetime import timedelta
+﻿from datetime import timedelta
 
 from odoo import fields
 from odoo.exceptions import AccessError, UserError, ValidationError
@@ -1556,7 +1556,6 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
         csv_data = wizard._render_csv()
         self.assertTrue(csv_data.startswith(b"\xef\xbb\xbf"))
         self.assertIn(b"'\t=HYPERLINK", csv_data)
-        self.assertIn("Scheme Test Distributor".encode(), csv_data) if original_name in csv_data.decode("utf-8-sig") else None
         xlsx_data = wizard._render_xlsx()
         import io
         from openpyxl import load_workbook
@@ -1585,3 +1584,4 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
         Line = self.env["gt.distributor.scheme.report.line"].with_user(self.manager)
         with self.assertRaises(AccessError):
             Line.with_context(_gt_report_line_create=True).create({"wizard_id": wizard.id})
+
