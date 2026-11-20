@@ -34,7 +34,9 @@ class DistributorSchemeClaimAdjustment(models.Model):
     already_fulfilled_quantity = fields.Float(readonly=True, digits="Product Unit of Measure")
     remaining_undelivered_quantity = fields.Float(readonly=True, digits="Product Unit of Measure")
     potential_excess_fulfillment = fields.Float(readonly=True, digits="Product Unit of Measure")
-    validation_status = fields.Selection([("stale", "Stale"), ("blocked", "Blocked")], readonly=True)
+    validation_status = fields.Selection([
+        ("current", "Current"), ("stale", "Stale"), ("blocked", "Blocked"),
+    ], readonly=True)
     evidence_payload = fields.Json(readonly=True)
     status = fields.Selection([
         ("open", "Open"), ("under_review", "Under Review"),

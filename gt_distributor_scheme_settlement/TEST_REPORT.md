@@ -217,3 +217,71 @@ Final addon test command (PowerShell; disposable PostgreSQL 18 cluster/database)
 - P08: supported Python runtime validation, full packaging, documentation and release checks.
 - The source guard coordinates Odoo ORM operations for the same company/distributor, including newly posted backdated invoices and edits to posted customer documents. It cannot coordinate raw SQL, direct PostgreSQL maintenance, or external applications writing around Odoo; such access must remain restricted operationally. Revalidation is still required immediately before P06 fulfillment; approved quantity remains frozen and is never silently adjusted.
 - The environment's Python 3.14.6 remains outside Odoo 20's declared support range. Supported Python validation, broader import/read-group fuzzing, and production-scale profiling remain. This P05 work does not make the product ready to publish.
+
+## P06 fulfillment and settlement
+
+### Implementation
+
+- Bumped the module to `20.0.6.0.0`; dependencies are `sale_stock`, `account`, and `mail`. The inspected Community `sale_stock` manifest depends on `sale`, `stock_account`, and therefore `stock`.
+- Verified Odoo 20 `sale.order.action_confirm`, `sale_stock` confirmation/stock-rule flow, `stock.picking.button_validate`, `stock.picking._create_return`, `stock.move._action_done`, `stock.move.quantity`, `stock.move.origin_returned_move_id` / `returned_move_ids`, and Odoo `uom.uom._compute_quantity`. Delivery is counted from completed customer-destination moves; linked completed returns are subtracted. Internal, draft, assigned, and reserved quantities do not establish delivery.
+- Added a manager fulfillment wizard and a protected one-claim/one-order `sale.order` link with SQL uniqueness. It uses the frozen P05 reward, explicit company/distributor/warehouse, one reward line, zero unit price, current source revalidation, and normal Odoo order confirmation/routing. Managers imply the standard Sales User role because Odoo sale-order ACLs are required to create and confirm the order. Unsupported nonzero payable tax totals block fulfillment.
+- Protected linked order and reward-line identity/quantity/product/UoM/price from direct writes, copy, unlink, and forged creation. Standard order confirmation rechecks manager/company/claim/source rules. Stock completion is guarded at Odoo 20 `stock.move._action_done`; it locks claim and accounting source scope, revalidates sources, enforces the remaining frozen entitlement, and rejects over-delivery before stock completion.
+- Added actual delivered, returned, net fulfilled, outstanding, and status computations; partial/backorder support uses standard Odoo movements. A verified return uses `origin_returned_move_id`; returns after settlement preserve the settlement event and append an adjustment. Late source changes append idempotent adjustment evidence and set `ADJUSTMENT_REQUIRED`; adjustment review records review only and cannot claim recovery. A bounded six-hour scheduled source scan is installed.
+- Settlement requires a confirmed linked order, intact approval evidence, current or specifically reviewed unchanged-entitlement source evidence, exact net delivery equal to frozen approved quantity, and no unresolved material adjustment. It stores a canonical SHA-256 reconciliation record and audit event. P06 creates no custom invoice, credit note, or journal entry.
+- Preserved the claim snapshot and approved values. An Odoo model constraint was extended to validate the immutable approval evidence in post-approval states; this was necessary for fulfillment state transitions.
+
+### P06 execution evidence
+
+Environment: Odoo 20.0 source checkout, PostgreSQL 18 disposable cluster on `127.0.0.1:55498`, disposable test database `gt_scheme_p04_test`, Python 3.14.6 (outside Odoo's declared Python 3.12-3.13 range), `.test/odoo-data` filestore. No production database used.
+
+| Check | Result | Evidence |
+|---|---|---|
+| P06 syntax and registry/XML/module update | PASS (unsupported interpreter) | `compileall models tests`; Odoo upgrade loaded sale/stock extension models, cron, ACLs, and views without registry/XML errors. `.test/odoo-p06-upgrade.log`. |
+| P01-P05 plus P06 regression suite | PASS (unsupported interpreter) | 65 post-tests, 0 failures, 0 errors, 19,314 SQL queries in 48.31s. `.test/odoo-p06-release-candidate.log`. Covers invoice calculation, source revisions/approvals, P04 close/snapshot, order creation/idempotency, guards, completed delivery and settlement, partial delivery/backorder, late refund blocking, and old foundation regressions. |
+| Over-delivery guard | PASS (targeted) | An attempted 6-unit completed delivery against a 5-unit approved claim is rejected; picking remains incomplete and verified fulfilled quantity stays zero. One targeted test, 0 failures/errors, `.test/odoo-p06-overdelivery.log`. |
+| Return after settlement | NOT RUN | Added real stock-return integration coverage; targeted result is pending at report preparation. |
+| Concurrent order creation / stock completion / settle race | NOT RUN | Database-backed row locks and unique order link are implemented, but no independent-cursor P06 race probe was executed. |
+| Python 3.12/3.13 runtime | NOT RUN | Only Python 3.14.6 was available; do not treat current test passes as supported-runtime verification. |
+| Multi-step routes, serial/lot, tax edge configurations, 1,000 movement benchmark | NOT RUN | P06 tests exercised the installed default one-step route and normal unit goods; these route and scale combinations still need dedicated coverage. |
+
+Final full suite command:
+
+```powershell
+& C:\PycharmProjects\odoo20\.venv\Scripts\python.exe C:\PycharmProjects\odoo20\odoo-20.0\odoo-bin -c C:\PycharmProjects\odoo20\odoo-20.0\odoo.conf -d gt_scheme_p04_test -u gt_distributor_scheme_settlement --test-enable --test-tags /gt_distributor_scheme_settlement --stop-after-init --db_host=127.0.0.1 --db_port=55498 --db_user=odoo_test --db_password= --data-dir=C:\PycharmProjects\odoo20\custom_addons\gt_distributor_scheme_settlement\.test\odoo-data --logfile=C:\PycharmProjects\odoo20\custom_addons\gt_distributor_scheme_settlement\.test\odoo-p06-release-candidate.log
+```
+
+### P06 acceptance matrix
+
+- **AC-25 approved order linkage: PASS (tested flow).** One authorized order is created, confirmed, zero-priced, and tied to the frozen reward/customer/company/warehouse; repeated call returns the same order. Full tax-jurisdiction matrix is not tested.
+- **AC-26 duplicate prevention: NOT RUN (complete concurrency criterion).** Database uniqueness, row locking, and sequential idempotency are present; concurrent P06 workers/RPC retries have not been exercised with independent PostgreSQL cursors.
+- **AC-27 actual delivered quantity: PASS for completed one-step customer delivery.** Real standard picking completion updates actual quantity and permits settlement; exhaustive internal-route, move-splitting, and return matrices are not complete.
+- **AC-28 partial/backorder: PASS (tested).** A real partial picking/backorder leaves outstanding quantity, the backorder completes against the same entitlement, and only then settlement succeeds.
+- **AC-29 late refund: PASS for pre-fulfillment hold.** A posted linked refund detected after approval creates an adjustment, blocks order creation, and preserves approved quantity/hash. Late refunds after partial/full settlement need additional verification.
+- **AC-30 negative/excess settlement: PASS for tested over-delivery attempt; otherwise PARTIAL.** Oversized delivery is blocked. Dedicated negative refund, excess-return, and all historical exposure combinations remain untested.
+
+### Critical invariant matrix
+
+| Invariant | Result | Evidence/limit |
+|---|---|---|
+| No duplicate entitlement/order | PASS sequential; concurrent NOT RUN | Claim unique scope, order unique claim link, idempotent retry test. |
+| No delivery above approved amount | PASS tested | Standard picking validation attempted above cap and blocked. |
+| No settlement without actual delivery | PASS tested | Confirmed order with zero delivery cannot finalize. |
+| No unauthorized approval / self-approval | PASS regression | P05 suite checks manager and separation-of-duties paths. |
+| No silent approved entitlement change | PASS tested | Source change preserves approval snapshot and quantity. |
+| No historical source/stock evidence rewrite | PASS ORM guards; broad import vectors NOT RUN | Original claim evidence and completed stock move guards remain. |
+| No silent late-refund adjustment | PASS pre-fulfillment case | Creates reviewable adjustment and blocks fulfillment. |
+| No cross-company leak | PASS P05 regression; P06 warehouse routes NOT RUN | P05 real Company A/B access test; P06 cross-company stock injection coverage incomplete. |
+| No custom accounting posting | PASS by exercised flow | P06 service only creates sale/stock operations; standard stock valuation may occur by configured Odoo policy. Full journal diff NOT RUN. |
+| No ORM/RPC/import bypass | PARTIAL | Direct sale-line mutation/copy and direct claim state write tested; complete import/read-group/RPC fuzzing not run. |
+| No false success after rollback | NOT RUN for P06 concurrent/forced failures | Standard Odoo transaction/savepoint is used; failure-injection matrix incomplete. |
+| No unsupported negative stock recovery | PASS by design; test coverage partial | No negative sale/stock/account move generated by adjustment service. |
+| No false settlement with open exceptions | PASS for tested outstanding/source cases | Material adjustment gate and exact quantity settlement check are enforced. |
+
+### P06 limitations and remaining P07-P08 work
+
+- P06 fulfillment requires a manager who also has standard Odoo Sales User ACLs. The manager role implies that group to keep the native sales workflow usable; deployment owners should account for this wider standard Sales permission.
+- Managers must explicitly select a warehouse if their company has more than one. Safe replacement fulfillment after cancellation is intentionally unsupported; unique order history prevents reissue and leaves the claim for controlled correction.
+- A zero sale price does not make a tax rule universally compliant. Nonzero payable totals block, but legal tax treatment remains customer/jurisdiction configuration.
+- The scheduled scan is bounded to 100 claims per company per run and chooses an active manager with accounting read access. Multi-worker queueing, large company backlog paging, and cron performance measurement remain.
+- Return after settlement test outcome, real concurrency probes, internal/multi-step routes, stock return/UoM and tracking matrix, source-scan scale, broad company stock access, and supported Python 3.12/3.13 runs remain before claiming P06 fully complete.
+- P07: secure reports/exports, dashboards, disclosure/performance hardening, complete regression. P08: upgrade verification, documentation, package and final release checks. Product is not READY TO PUBLISH.

@@ -10,8 +10,10 @@ from odoo.addons.account.tests.common import AccountTestInvoicingCommon
 class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
     @classmethod
     def get_default_groups(cls):
-        return super().get_default_groups() | cls.env.ref(
-            "gt_distributor_scheme_settlement.group_scheme_manager"
+        return (
+            super().get_default_groups()
+            | cls.env.ref("gt_distributor_scheme_settlement.group_scheme_manager")
+            | cls.env.ref("stock.group_stock_user")
         )
 
     @classmethod
@@ -320,7 +322,9 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
         delivery.move_ids.write({"quantity": 5, "picked": True})
         delivery.button_validate()
         claim.with_user(self.manager).action_finalize_settlement()
-        return_picking = delivery._create_return()
+        # Use the standard Odoo return flow under a warehouse-capable technical
+        # test user; this fixture's current transaction user lacks stock ACLs.
+        return_picking = delivery.sudo()._create_return()
         return_picking.move_ids.product_uom_qty = 2
         return_picking.action_confirm()
         return_picking.action_assign()
