@@ -118,6 +118,7 @@ class DistributorSchemeDashboard(models.TransientModel):
 
     def action_open_report_wizard(self):
         self.ensure_one()
+        self.check_access("read")
         self._validate_scope(self.company_id.id)
         return {
             "type": "ir.actions.act_window", "name": _("Settlement Reports"),
@@ -271,6 +272,9 @@ class DistributorSchemeReportWizard(models.TransientModel):
 
     def action_generate(self):
         self.ensure_one()
+        self.check_access("read")
+        self.check_access("write")
+        self._assert_report_access()
         rows = self._build_values()
         self.line_ids.with_context(_gt_report_line_cleanup=REPORT_TOKEN).unlink()
         Line = self.env["gt.distributor.scheme.report.line"]

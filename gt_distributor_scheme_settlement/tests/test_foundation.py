@@ -1557,13 +1557,13 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
         wizard.action_generate()
         csv_data = wizard._render_csv()
         self.assertTrue(csv_data.startswith(b"\xef\xbb\xbf"))
-        self.assertIn(b"'\t=HYPERLINK", csv_data)
+        self.assertIn(b"'=HYPERLINK", csv_data)
         xlsx_data = wizard._render_xlsx()
         import io
         from openpyxl import load_workbook
         sheet = load_workbook(io.BytesIO(xlsx_data), read_only=True, data_only=False).active
         self.assertTrue(all(cell.data_type != "f" for row in sheet.iter_rows() for cell in row))
-        self.assertTrue(any(str(cell.value).startswith("'\t=HYPERLINK") for row in sheet.iter_rows() for cell in row if cell.value))
+        self.assertTrue(any(str(cell.value).startswith("'=HYPERLINK") for row in sheet.iter_rows() for cell in row if cell.value))
         self.distributor.name = original_name
 
     def test_p07_formula_neutralization_handles_prefixes_controls_and_unicode(self):
@@ -1594,4 +1594,22 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
         Line = self.env["gt.distributor.scheme.report.line"].with_user(self.manager)
         with self.assertRaises(AccessError):
             Line.with_context(_gt_report_line_create=True).create({"wizard_id": wizard.id})
+
+    def test_p07_attachment_access_follows_linked_company_record(self):
+        reward_b = self._create_product(
+            name="Scheme Test Company B Reward", company_id=self.company_b.id, uom_id=self.uom_unit.id,
+        )
+        scheme_b = self.env["gt.distributor.scheme"].sudo().create({
+            "name": "Company B Restricted Scheme", "code": "P07-ATTACH-B",
+            "company_id": self.company_b.id, "qualifying_product_id": self.product_b.id,
+            "reward_product_id": reward_b.id, "distributor_ids": [(4, self.distributor.id)],
+            "date_start": "2026-01-01", "date_end": "2026-12-31",
+            "qualifying_uom_id": self.product_b.uom_id.id,
+        })
+        attachment = self.env["ir.attachment"].sudo().create({
+            "name": "restricted-scheme-evidence.txt", "raw": b"company B evidence",
+            "res_model": scheme_b._name, "res_id": scheme_b.id, "company_id": self.company_b.id,
+        })
+        with self.assertRaises(AccessError):
+            attachment.with_user(self.operator).check_access("read")
 
