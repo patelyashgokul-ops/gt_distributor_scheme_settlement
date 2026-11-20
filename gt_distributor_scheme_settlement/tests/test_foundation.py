@@ -274,6 +274,41 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
         claim.with_user(self.manager).action_finalize_settlement()
         self.assertEqual(claim.state, "settled")
 
+    def test_p06_late_refund_blocks_order_and_preserves_approved_snapshot(self):
+        claim = self._p06_approved_claim("P06-LATE-REFUND", reward=5)
+        invoice = claim.source_ids.filtered(lambda row: row.source_role == "invoice").move_id
+        approved_hash = claim.approval_evidence_hash
+        approved_quantity = claim.approved_reward_quantity
+        self._create_invoice_one_line(
+            move_type="out_refund", product_id=self.product_a, quantity=10,
+            invoice_date="2026-02-10", partner_id=self.distributor.id,
+            reversed_entry_id=invoice.id, post=True,
+        )
+        warehouse = self.env["stock.warehouse"].search([("company_id", "=", claim.company_id.id)], limit=1)
+        result = claim.with_user(self.manager).action_prepare_free_goods_fulfillment(warehouse.id)
+        self.assertEqual(result["tag"], "display_notification")
+        self.assertFalse(claim.fulfillment_order_id)
+        self.assertEqual(claim.state, "adjustment_required")
+        self.assertTrue(claim.adjustment_ids)
+        self.assertEqual(claim.approved_reward_quantity, approved_quantity)
+        self.assertEqual(claim.approval_evidence_hash, approved_hash)
+
+    def test_p06_stock_validation_cannot_deliver_above_approved_entitlement(self):
+        claim = self._p06_approved_claim("P06-OVERDELIVERY", reward=5)
+        order, warehouse = self._p06_prepare_order(claim)
+        self.env["stock.quant"]._update_available_quantity(
+            claim.approved_reward_product_id, warehouse.lot_stock_id, 6
+        )
+        picking = order.picking_ids.filtered(lambda item: item.picking_type_code == "outgoing")
+        picking.action_assign()
+        picking.move_ids.write({"quantity": 6, "picked": True})
+        with self.assertRaises(UserError):
+            picking.button_validate()
+        self.assertNotEqual(picking.state, "done")
+        claim.invalidate_recordset()
+        self.assertEqual(claim.net_fulfilled_quantity, 0)
+        self.assertEqual(claim.state, "fulfillment_in_progress")
+
     def test_p05_manager_approves_current_claim_and_freezes_entitlement(self):
         claim = self._p05_reviewable_claim("P05-APPROVE")
         picking_count = self.env["stock.picking"].search_count([])
