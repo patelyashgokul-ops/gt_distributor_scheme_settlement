@@ -309,6 +309,31 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
         self.assertEqual(claim.net_fulfilled_quantity, 0)
         self.assertEqual(claim.state, "fulfillment_in_progress")
 
+    def test_p06_verified_reward_return_after_settlement_creates_exception(self):
+        claim = self._p06_approved_claim("P06-RETURN", reward=5)
+        order, warehouse = self._p06_prepare_order(claim)
+        self.env["stock.quant"]._update_available_quantity(
+            claim.approved_reward_product_id, warehouse.lot_stock_id, 5
+        )
+        delivery = order.picking_ids.filtered(lambda item: item.picking_type_code == "outgoing")
+        delivery.action_assign()
+        delivery.move_ids.write({"quantity": 5, "picked": True})
+        delivery.button_validate()
+        claim.with_user(self.manager).action_finalize_settlement()
+        return_picking = delivery._create_return()
+        return_picking.move_ids.product_uom_qty = 2
+        return_picking.action_confirm()
+        return_picking.action_assign()
+        return_picking.move_ids.write({"quantity": 2, "picked": True})
+        return_picking.button_validate()
+        claim.invalidate_recordset()
+        self.assertEqual(claim.fulfilled_quantity, 5)
+        self.assertEqual(claim.returned_quantity, 2)
+        self.assertEqual(claim.net_fulfilled_quantity, 3)
+        self.assertEqual(claim.state, "adjustment_required")
+        self.assertEqual(claim.settled_at.date(), fields.Date.today())
+        self.assertTrue(claim.adjustment_ids.filtered(lambda item: item.adjustment_type == "reward_return"))
+
     def test_p05_manager_approves_current_claim_and_freezes_entitlement(self):
         claim = self._p05_reviewable_claim("P05-APPROVE")
         picking_count = self.env["stock.picking"].search_count([])
