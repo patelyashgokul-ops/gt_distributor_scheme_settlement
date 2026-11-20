@@ -1,16 +1,21 @@
 import hashlib
 import json
 import math
+import logging
 from decimal import Decimal, ROUND_HALF_UP
+from datetime import timedelta
 
 from odoo import api, fields, models, _
 from odoo.exceptions import AccessError, UserError, ValidationError
 from odoo.tools.float_utils import float_compare
 
 from .service_tokens import (
-    ADJUSTMENT_TOKEN, CLAIM_CREATE_TOKEN, CLAIM_WRITE_TOKEN, FULFILLMENT_TOKEN,
+    ADJUSTMENT_TOKEN, AUDIT_CREATE_TOKEN, CLAIM_CREATE_TOKEN, CLAIM_WRITE_TOKEN, FULFILLMENT_TOKEN,
+    P06_MONITOR_TOKEN,
     REVISION_CREATE_TOKEN, REVISION_WRITE_TOKEN, SETTLEMENT_TOKEN,
 )
+
+_logger = logging.getLogger(__name__)
 
 
 class DistributorSchemeClaim(models.Model):
@@ -201,7 +206,8 @@ class DistributorSchemeClaim(models.Model):
         approved = self.approved_reward_quantity or 0.0
         if not self.fulfillment_order_id:
             return {"outbound": 0.0, "returned": 0.0, "net": 0.0, "outstanding": approved}
-        reward_lines = self.fulfillment_order_id.order_line.filtered(
+        order = self.fulfillment_order_id.sudo()
+        reward_lines = order.order_line.filtered(
             lambda line: line.scheme_claim_id == self and line.is_scheme_reward_line
         )
         all_moves = reward_lines.move_ids
@@ -800,11 +806,11 @@ class DistributorSchemeClaim(models.Model):
             "source_validation_result": validation,
         }
         self.with_context(_gt_claim_write_token=CLAIM_WRITE_TOKEN).write(values)
-        self.env["gt.distributor.scheme.audit"]._record_event({
+        event = {
             "company_id": self.company_id.id,
             "scheme_id": self.scheme_id.id,
             "claim_id": self.id,
-            "event_type": "post_approval_source_change_detected" if self.state == "approved" else "claim_source_revalidated",
+            "event_type": "post_approval_source_change_detected" if self.state in ("approved", "fulfillment_in_progress", "settled", "adjustment_required") else "claim_source_revalidated",
             "evidence": {
                 "claim_id": self.id,
                 "claim_number": self.name,
@@ -814,7 +820,12 @@ class DistributorSchemeClaim(models.Model):
                 "current": validation["current"],
                 "exception_codes": validation.get("exception_codes", []),
             },
-        })
+        }
+        audit_model = self.env["gt.distributor.scheme.audit"]
+        if self.env.context.get("_gt_p06_monitor_token") is P06_MONITOR_TOKEN:
+            audit_model.with_context(_gt_audit_service_token=AUDIT_CREATE_TOKEN).create(event)
+        else:
+            audit_model._record_event(event)
 
     def _active_validation(self):
         self.ensure_one()
@@ -1229,6 +1240,57 @@ class DistributorSchemeClaim(models.Model):
                 "source_validation_result": validation,
             })
         return validation
+
+    @api.model
+    def _cron_scan_post_approval_source_changes(self):
+        """Bounded scan. Each calculation runs as a manager with invoice read access."""
+        if self.env.context.get("_gt_p06_monitor_token") is not P06_MONITOR_TOKEN:
+            raise AccessError(_("Post-approval source monitoring can only run through its scheduled service."))
+        company_model = self.env["res.company"]
+        manager_group = self.env.ref("gt_distributor_scheme_settlement.group_scheme_manager")
+        companies = company_model.search([])
+        cutoff = fields.Datetime.now() - timedelta(hours=6)
+        scanned = flagged = failed = 0
+        for company in companies:
+            managers = self.env["res.users"].search([
+                ("active", "=", True), ("groups_id", "in", manager_group.id),
+                ("company_ids", "in", company.id),
+            ], order="id", limit=1)
+            if not managers:
+                _logger.error("P06 source scan skipped company %s: no active scheme manager is assigned", company.id)
+                failed += 1
+                continue
+            manager = managers[0]
+            company_claims = self.with_user(manager).with_company(company).with_context(
+                allowed_company_ids=[company.id], _gt_p06_monitor_token=P06_MONITOR_TOKEN
+            )
+            claims = company_claims.search([
+                ("company_id", "=", company.id),
+                ("state", "in", ["approved", "fulfillment_in_progress", "settled", "adjustment_required"]),
+                "|", ("source_validation_at", "=", False), ("source_validation_at", "<=", cutoff),
+            ], order="id", limit=100)
+            for claim in claims:
+                try:
+                    with claim.env.cr.savepoint():
+                        claim.env["account.move"]._gt_lock_scheme_source_scope(
+                            claim.company_id.id, claim.distributor_id.commercial_partner_id.id
+                        )
+                        validation = claim._active_validation()
+                        scanned += 1
+                        if validation["status"] != "current":
+                            # Preserve the job actor in audit and exception records; the manager is
+                            # used only for the source read that requires business permissions.
+                            job_claim = self.env["gt.distributor.scheme.claim"].browse(claim.id)
+                            job_claim.with_context(_gt_p06_monitor_token=P06_MONITOR_TOKEN)._store_revalidation(validation)
+                            job_claim._record_p06_adjustment(validation)
+                            if job_claim.state != "adjustment_required":
+                                job_claim.with_context(_gt_claim_write_token=CLAIM_WRITE_TOKEN).write({"state": "adjustment_required"})
+                            flagged += 1
+                except Exception:
+                    failed += 1
+                    _logger.exception("P06 source scan failed for claim %s; no success was recorded", claim.id)
+        _logger.info("P06 source scan completed: %s scanned, %s flagged, %s failed", scanned, flagged, failed)
+        return {"scanned": scanned, "flagged": flagged, "failed": failed}
 
     def action_submit(self):
         self.ensure_one()
