@@ -1,3 +1,6 @@
+from datetime import timedelta
+
+from odoo import fields
 from odoo.exceptions import AccessError, UserError, ValidationError
 from odoo.tests import tagged
 from odoo.addons.account.tests.common import AccountTestInvoicingCommon
@@ -76,6 +79,24 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
             "company_id": cls.company_a.id,
             "company_ids": [(6, 0, [cls.company_a.id])],
             "group_ids": [(6, 0, [cls.env.ref("base.group_user").id])],
+        })
+
+    def _preview(self, date_start="2026-01-01", date_end="2026-01-31", as_of=None,
+                 scheme=None, distributor=None, user=None):
+        return self.env["gt.distributor.scheme.calculator"].with_user(user or self.manager).calculate_eligibility(
+            (scheme or self.scheme).id,
+            (distributor or self.distributor).id,
+            date_start,
+            date_end,
+            as_of or fields.Datetime.now(),
+        )
+
+    def _basic_slab(self, minimum=1, maximum=False, reward=1, scheme=None):
+        return self.env["gt.distributor.scheme.slab"].create({
+            "scheme_id": (scheme or self.scheme).id,
+            "minimum_quantity": minimum,
+            "maximum_quantity": maximum,
+            "reward_quantity": reward,
         })
 
     def test_required_model_fields(self):
@@ -200,6 +221,124 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
         self.assertEqual(len(result["source_lines"]), 1)
         self.assertEqual(len(result["refund_lines"]), 1)
         self.assertEqual(result["refund_lines"][0]["reversed_entry_id"], invoice.id)
+
+    def test_preview_excludes_zero_and_fully_discounted_lines(self):
+        self._basic_slab()
+        self._create_invoice_one_line(product_id=self.product_a, quantity=10, price_unit=20,
+                                      invoice_date="2026-01-10", partner_id=self.distributor.id, post=True)
+        self._create_invoice_one_line(product_id=self.product_a, quantity=100, price_unit=0,
+                                      invoice_date="2026-01-11", partner_id=self.distributor.id, post=True)
+        self._create_invoice_one_line(product_id=self.product_a, quantity=50, price_unit=20, discount=100,
+                                      invoice_date="2026-01-12", partner_id=self.distributor.id, post=True)
+        result = self._preview()
+        self.assertEqual(result["calculation_status"], "ELIGIBLE")
+        self.assertEqual(result["gross_quantity"], 10)
+        self.assertEqual(result["invoice_count"], 1)
+        self.assertEqual(len([row for row in result["invoice_sources"] if row["line_classification"] == "ZERO_VALUE"]), 2)
+
+    def test_multiple_partial_credit_notes_and_late_refund_attribution(self):
+        self.scheme.write({"qualifying_uom_id": self.uom_dozen.id})
+        self._basic_slab(minimum=1, maximum=8, reward=1)
+        self._basic_slab(minimum=8, maximum=12, reward=2)
+        invoice = self._create_invoice_one_line(product_id=self.product_a, quantity=120,
+                                                invoice_date="2026-01-10", partner_id=self.distributor.id, post=True)
+        first = self._create_invoice_one_line(move_type="out_refund", product_id=self.product_a, quantity=12,
+                                              invoice_date="2026-01-20", partner_id=self.distributor.id,
+                                              reversed_entry_id=invoice.id, post=True)
+        second = self._create_invoice_one_line(move_type="out_refund", product_id=self.product_a, quantity=12,
+                                               invoice_date="2026-02-05", partner_id=self.distributor.id,
+                                               reversed_entry_id=invoice.id, post=True)
+        result = self._preview(as_of=fields.Datetime.now())
+        self.assertEqual(result["calculation_status"], "ELIGIBLE")
+        self.assertAlmostEqual(result["gross_quantity"], 10)
+        self.assertAlmostEqual(result["refund_quantity"], 2)
+        self.assertAlmostEqual(result["net_quantity"], 8)
+        self.assertEqual(result["refund_count"], 2)
+        self.assertTrue(any(row["move_id"] == second.id and row.get("late_refund") for row in result["refund_sources"]))
+        self.assertTrue(any(item["code"] == "LATE_REFUND" and item["severity"] == "WARNING" for item in result["exceptions"]))
+        self.assertNotIn(first.id, {row["move_id"] for row in result["invoice_sources"]})
+
+    def test_unlinked_refund_is_a_blocking_preview_not_a_guess(self):
+        self._basic_slab()
+        self._create_invoice_one_line(product_id=self.product_a, quantity=10,
+                                      invoice_date="2026-01-10", partner_id=self.distributor.id, post=True)
+        self._create_invoice_one_line(move_type="out_refund", product_id=self.product_a, quantity=1,
+                                      invoice_date="2026-01-20", partner_id=self.distributor.id, post=True)
+        result = self._preview()
+        self.assertEqual(result["calculation_status"], "BLOCKED")
+        self.assertIn("UNATTRIBUTED_REFUND", {item["code"] for item in result["exceptions"]})
+
+    def test_ambiguous_multi_line_refund_attribution_blocks(self):
+        self._basic_slab()
+        invoice = self._create_invoice(
+            invoice_date="2026-01-10", partner_id=self.distributor.id, post=True,
+            invoice_line_ids=[
+                self._prepare_invoice_line(product_id=self.product_a, quantity=10),
+                self._prepare_invoice_line(product_id=self.product_a, quantity=10),
+            ],
+        )
+        self._create_invoice_one_line(move_type="out_refund", product_id=self.product_a, quantity=2,
+                                      invoice_date="2026-01-20", partner_id=self.distributor.id,
+                                      reversed_entry_id=invoice.id, post=True)
+        result = self._preview()
+        self.assertEqual(result["calculation_status"], "BLOCKED")
+        self.assertIn("AMBIGUOUS_REFUND_LINE_ATTRIBUTION", {item["code"] for item in result["exceptions"]})
+
+    def test_child_contact_identity_matches_p02_commercial_partner_policy(self):
+        self._basic_slab()
+        child = self.env["res.partner"].create({"name": "Distributor Invoice Contact", "parent_id": self.distributor.id, "type": "invoice"})
+        self._create_invoice_one_line(product_id=self.product_a, quantity=7,
+                                      invoice_date="2026-01-10", partner_id=child.id, post=True)
+        result = self._preview()
+        self.assertEqual(result["gross_quantity"], 7)
+        self.assertEqual(result["invoice_count"], 1)
+
+    def test_preview_fingerprint_is_stable_and_changes_after_source_edit(self):
+        self._basic_slab()
+        invoice = self._create_invoice_one_line(product_id=self.product_a, quantity=10,
+                                                invoice_date="2026-01-10", partner_id=self.distributor.id, post=True)
+        cutoff = fields.Datetime.now()
+        first = self._preview(as_of=cutoff)
+        same = self._preview(as_of=cutoff)
+        self.assertEqual(first["source_fingerprint"], same["source_fingerprint"])
+        invoice.write({"ref": "P03 fingerprint evidence change"})
+        changed = self._preview()
+        self.assertNotEqual(first["source_fingerprint"], changed["source_fingerprint"])
+
+    def test_backdated_source_after_cutoff_is_blocked(self):
+        self._basic_slab()
+        cutoff = fields.Datetime.now() - timedelta(days=1)
+        self._create_invoice_one_line(product_id=self.product_a, quantity=10,
+                                      invoice_date="2026-01-10", partner_id=self.distributor.id, post=True)
+        result = self._preview(as_of=cutoff)
+        self.assertEqual(result["calculation_status"], "BLOCKED")
+        self.assertIn("SOURCE_CHANGED_AFTER_CUTOFF", {item["code"] for item in result["exceptions"]})
+
+    def test_read_only_preview_does_not_create_claims(self):
+        self._basic_slab()
+        self._create_invoice_one_line(product_id=self.product_a, quantity=10,
+                                      invoice_date="2026-01-10", partner_id=self.distributor.id, post=True)
+        claims_before = self.env["gt.distributor.scheme.claim"].search_count([])
+        result = self._preview()
+        self.assertEqual(result["calculation_status"], "ELIGIBLE")
+        self.assertEqual(self.env["gt.distributor.scheme.claim"].search_count([]), claims_before)
+
+    def test_native_preview_wizard_and_server_side_role_check(self):
+        self._basic_slab()
+        self._create_invoice_one_line(product_id=self.product_a, quantity=10,
+                                      invoice_date="2026-01-10", partner_id=self.distributor.id, post=True)
+        wizard = self.env["gt.distributor.scheme.preview.wizard"].with_user(self.manager).create({
+            "scheme_id": self.scheme.id,
+            "distributor_id": self.distributor.id,
+            "date_start": "2026-01-01",
+            "date_end": "2026-01-31",
+            "as_of": fields.Datetime.now(),
+        })
+        action = wizard.action_calculate()
+        self.assertEqual(wizard.calculation_status, "ELIGIBLE")
+        self.assertEqual(action["res_id"], wizard.id)
+        with self.assertRaises(AccessError):
+            wizard.with_user(self.internal_user).action_calculate()
 
     def test_linked_out_of_period_refund_is_rejected_for_review(self):
         self.scheme.write({"qualifying_uom_id": self.uom_dozen.id})

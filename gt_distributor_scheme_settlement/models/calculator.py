@@ -344,6 +344,11 @@ class DistributorSchemeCalculator(models.AbstractModel):
     def _classify_product_line(self, line, exceptions):
         if line.display_type != "product" or not line.product_id:
             return "EXCLUDED"
+        if line.quantity <= 0:
+            self._exception(exceptions, "INVALID_LINE_QUANTITY", "BLOCKING", _(
+                "A qualifying product line has a zero or negative quantity and needs accounting review."
+            ))
+            return "BLOCKED"
         currency = line.currency_id
         subtotal = line.price_subtotal
         if currency and currency.is_zero(subtotal):
@@ -351,11 +356,6 @@ class DistributorSchemeCalculator(models.AbstractModel):
         if not currency or subtotal < 0:
             self._exception(exceptions, "INVALID_LINE_VALUE", "BLOCKING", _(
                 "A qualifying product line has a negative or unavailable untaxed subtotal and needs accounting review."
-            ))
-            return "BLOCKED"
-        if line.quantity <= 0:
-            self._exception(exceptions, "INVALID_LINE_QUANTITY", "BLOCKING", _(
-                "A paid qualifying product line has a zero or negative quantity and needs accounting review."
             ))
             return "BLOCKED"
         if not line.product_uom_id:
