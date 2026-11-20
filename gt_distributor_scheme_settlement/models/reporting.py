@@ -33,6 +33,7 @@ class DistributorSchemeDashboard(models.TransientModel):
     adjustment_count = fields.Integer(compute="_compute_metrics")
     late_refund_count = fields.Integer(compute="_compute_metrics")
     outstanding_delivery_count = fields.Integer(compute="_compute_metrics")
+    blocked_outstanding_count = fields.Integer(compute="_compute_metrics")
 
     @api.model
     def _validate_scope(self, company_id):
@@ -91,6 +92,7 @@ class DistributorSchemeDashboard(models.TransientModel):
                                      and c.source_validation_status == "current"
                                      and c not in unresolved_adjustment_claims
                                      and c.outstanding_quantity > 0)
+        outstanding = claims.filtered(lambda c: c.state in APPROVED_STATES and c.outstanding_quantity > 0)
         scheme_domain = [("company_id", "=", company.id), ("state", "=", "active")]
         if self.scheme_id:
             scheme_domain.append(("id", "=", self.scheme_id.id))
@@ -99,12 +101,13 @@ class DistributorSchemeDashboard(models.TransientModel):
         return {
             "active_scheme_count": active,
             "pending_review_count": len(claims.filtered(lambda c: c.state in ("submitted", "under_review"))),
-            "approved_count": len(claims.filtered(lambda c: c.state in APPROVED_STATES)),
+            "approved_count": len(claims.filtered(lambda c: c.state in APPROVED_STATES and bool(c.approved_at))),
             "fulfillment_count": len(claims.filtered(lambda c: c.state == "fulfillment_in_progress")),
             "settled_count": len(claims.filtered(lambda c: c.state == "settled")),
             "adjustment_count": len(claims.filtered(lambda c: c.state == "adjustment_required" or c in unresolved_adjustment_claims)),
             "late_refund_count": late_refunds,
             "outstanding_delivery_count": len(releasable),
+            "blocked_outstanding_count": len(outstanding - releasable),
         }
 
     def action_open_report_wizard(self):
@@ -202,7 +205,8 @@ class DistributorSchemeReportWizard(models.TransientModel):
                 claim = adj.claim_id
                 rows.append({
                     "report_type": "adjustment", "company_id": adj.company_id.id, "company_name": adj.company_id.display_name, "claim_id": claim.id,
-                    "adjustment_id": adj.id, "scheme_id": claim.scheme_id.id, "period_id": claim.period_id.id,
+                    "adjustment_id": adj.id, "adjustment_reference": f"ADJ-{adj.id}",
+                    "scheme_id": claim.scheme_id.id, "period_id": claim.period_id.id,
                     "distributor_id": claim.distributor_id.id, "scheme_name": claim.scheme_id.name,
                     "distributor_name": claim.distributor_id.display_name, "claim_reference": claim.name,
                     "claim_state": claim.state, "source_validation_status": adj.validation_status,
@@ -225,7 +229,7 @@ class DistributorSchemeReportWizard(models.TransientModel):
             key = (claim.company_id.id, claim.scheme_id.id, product.id, uom.id)
             row = grouped.setdefault(key, {
                 "report_type": "scheme", "company_id": claim.company_id.id, "company_name": claim.company_id.display_name, "scheme_id": claim.scheme_id.id,
-                "scheme_name": claim.scheme_id.name, "reward_product_id": product.id,
+                "scheme_name": claim.scheme_id.name, "scheme_state": claim.scheme_id.state, "reward_product_id": product.id,
                 "reward_product_name": product.display_name, "reward_uom_id": uom.id,
                 "reward_uom_name": uom.display_name, "eligible_distributor_count": 0,
                 "claim_count": 0, "approved_count": 0, "rejected_count": 0, "settled_count": 0,
@@ -281,12 +285,15 @@ class DistributorSchemeReportLine(models.TransientModel):
     wizard_id = fields.Many2one("gt.distributor.scheme.report.wizard", required=True, ondelete="cascade", index=True)
     report_type = fields.Selection(related="wizard_id.report_type", store=True)
     company_id = fields.Many2one("res.company", readonly=True)
+    company_name = fields.Char(readonly=True)
     claim_id = fields.Many2one("gt.distributor.scheme.claim", readonly=True)
     adjustment_id = fields.Many2one("gt.distributor.scheme.claim.adjustment", readonly=True)
+    adjustment_reference = fields.Char(readonly=True)
     scheme_id = fields.Many2one("gt.distributor.scheme", readonly=True)
     period_id = fields.Many2one("gt.distributor.scheme.period", readonly=True)
     distributor_id = fields.Many2one("res.partner", readonly=True)
     scheme_name = fields.Char(readonly=True)
+    scheme_state = fields.Char(readonly=True)
     distributor_name = fields.Char(readonly=True)
     claim_reference = fields.Char(readonly=True)
     claim_state = fields.Char(readonly=True)
@@ -404,10 +411,10 @@ def _report_xlsx(wizard):
 
 def _export_columns(self):
     mapping = {
-        "scheme": [("scheme_name", "Scheme", "text"), ("company_id", "Company ID", "text"), ("reward_product_name", "Reward Product", "text"), ("reward_uom_name", "Reward UoM", "text"), ("eligible_distributor_count", "Eligible Distributors", "number"), ("claim_count", "Claims", "number"), ("approved_count", "Approved Claims", "number"), ("rejected_count", "Rejected Claims", "number"), ("settled_count", "Settled Claims", "number"), ("approved_quantity", "Approved Quantity", "number"), ("delivered_quantity", "Net Delivered Quantity", "number"), ("outstanding_quantity", "Outstanding Quantity", "number"), ("open_adjustments", "Open Adjustments", "number")],
+        "scheme": [("scheme_name", "Scheme", "text"), ("company_name", "Company", "text"), ("reward_product_name", "Reward Product", "text"), ("reward_uom_name", "Reward UoM", "text"), ("eligible_distributor_count", "Eligible Distributors", "number"), ("claim_count", "Claims", "number"), ("approved_count", "Approved Claims", "number"), ("rejected_count", "Rejected Claims", "number"), ("settled_count", "Settled Claims", "number"), ("approved_quantity", "Approved Quantity", "number"), ("delivered_quantity", "Net Delivered Quantity", "number"), ("outstanding_quantity", "Outstanding Quantity", "number"), ("open_adjustments", "Open Adjustments", "number")],
         "distributor": [("claim_reference", "Claim", "text"), ("distributor_name", "Distributor", "text"), ("scheme_name", "Scheme", "text"), ("gross_quantity", "Gross Purchase Qty", "number"), ("refund_quantity", "Refund Qty", "number"), ("net_quantity", "Net Purchase Qty", "number"), ("slab_name", "Slab", "text"), ("reward_product_name", "Reward Product", "text"), ("reward_uom_name", "Reward UoM", "text"), ("approved_quantity", "Approved Qty", "number"), ("delivered_quantity", "Net Delivered Qty", "number"), ("outstanding_quantity", "Outstanding Qty", "number"), ("releasable_quantity", "Currently Releasable Qty", "number"), ("claim_state", "Claim State", "text"), ("source_validation_status", "Source Validation", "text")],
-        "outstanding": [("claim_reference", "Claim", "text"), ("distributor_name", "Distributor", "text"), ("scheme_name", "Scheme", "text"), ("reward_product_name", "Reward Product", "text"), ("reward_uom_name", "Reward UoM", "text"), ("approved_quantity", "Approved Qty", "number"), ("delivered_quantity", "Delivered Qty", "number"), ("returned_quantity", "Returned Qty", "number"), ("outstanding_quantity", "Outstanding Qty", "number"), ("releasable_quantity", "Releasable Qty", "number"), ("held", "Blocked", "text"), ("claim_state", "Claim State", "text"), ("source_validation_status", "Source Validation", "text")],
-        "adjustment": [("adjustment_id", "Adjustment ID", "text"), ("claim_reference", "Claim", "text"), ("distributor_name", "Distributor", "text"), ("scheme_name", "Scheme", "text"), ("adjustment_type", "Type", "text"), ("adjustment_date", "Detected Date", "date"), ("approved_quantity", "Original Approved Qty", "number"), ("current_entitlement", "Current Theoretical Qty", "number"), ("signed_difference", "Signed Difference", "number"), ("delivered_quantity", "Net Delivered Qty", "number"), ("potential_excess", "Potential Excess Qty", "number"), ("adjustment_status", "Status", "text"), ("adjustment_reason", "Reason", "text")],
+        "outstanding": [("claim_reference", "Claim", "text"), ("distributor_name", "Distributor", "text"), ("scheme_name", "Scheme", "text"), ("company_name", "Company", "text"), ("scheme_state", "State", "text"), ("reward_product_name", "Reward Product", "text"), ("reward_uom_name", "Reward UoM", "text"), ("approved_quantity", "Approved Qty", "number"), ("delivered_quantity", "Delivered Qty", "number"), ("returned_quantity", "Returned Qty", "number"), ("outstanding_quantity", "Outstanding Qty", "number"), ("releasable_quantity", "Releasable Qty", "number"), ("held", "Blocked", "text"), ("claim_state", "Claim State", "text"), ("source_validation_status", "Source Validation", "text")],
+        "adjustment": [("adjustment_reference", "Adjustment", "text"), ("claim_reference", "Claim", "text"), ("distributor_name", "Distributor", "text"), ("scheme_name", "Scheme", "text"), ("adjustment_type", "Type", "text"), ("adjustment_date", "Detected Date", "date"), ("approved_quantity", "Original Approved Qty", "number"), ("current_entitlement", "Current Theoretical Qty", "number"), ("signed_difference", "Signed Difference", "number"), ("delivered_quantity", "Net Delivered Qty", "number"), ("potential_excess", "Potential Excess Qty", "number"), ("adjustment_status", "Status", "text"), ("adjustment_reason", "Reason", "text")],
     }
     return mapping[self.report_type]
 
@@ -415,4 +422,6 @@ def _export_columns(self):
 DistributorSchemeReportWizard._export_columns = _export_columns
 DistributorSchemeReportWizard._render_csv = _report_csv
 DistributorSchemeReportWizard._render_xlsx = _report_xlsx
+
+
 
