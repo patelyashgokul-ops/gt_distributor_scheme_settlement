@@ -32,7 +32,7 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
             "name": "Scheme Test Distributor",
             "vat": "P01TESTVAT",
         })
-        cls.scheme = cls.env["gt.distributor.scheme"].create({
+        cls.scheme = cls.env["gt.distributor.scheme"].sudo().create({
             "name": "Foundation Test Scheme",
             "code": "FOUNDATION-TEST",
             "company_id": cls.company_a.id,
