@@ -20,16 +20,30 @@ class DistributorSchemeCalculator(models.AbstractModel):
     @api.model
     def calculate_entitlement(self, scheme_id, distributor_id, period_id):
         """P02-compatible wrapper; calculation remains read-only."""
+        self._check_calculation_role()
         period = self.env["gt.distributor.scheme.period"].browse(period_id).exists()
         if len(period) != 1:
             raise ValidationError(_("Select an existing calculation period."))
-        return self.calculate_eligibility(
+        period.check_access("read")
+        scheme = self.env["gt.distributor.scheme"].browse(scheme_id).exists()
+        if len(scheme) != 1:
+            raise ValidationError(_("Select an existing scheme."))
+        scheme.check_access("read")
+        if period.scheme_id != scheme or period.company_id != scheme.company_id:
+            raise ValidationError(_("The calculation period must belong to the selected scheme and company."))
+        if period.state != "open":
+            raise UserError(_("A closed calculation period cannot be recalculated."))
+        result = self.calculate_eligibility(
             scheme_id,
             distributor_id,
             period.date_start,
             period.date_end,
             fields.Datetime.now(),
         )
+        if result["calculation_status"] == "BLOCKED":
+            message = next((item["message"] for item in result["exceptions"] if item["severity"] == "BLOCKING"), None)
+            raise UserError(message or _("This calculation needs review before it can be trusted."))
+        return result
 
     @api.model
     def calculate_eligibility(self, scheme_id, distributor_id, date_start, date_end, as_of):
@@ -223,7 +237,7 @@ class DistributorSchemeCalculator(models.AbstractModel):
         ).encode("utf-8")).hexdigest()
         return {
             # P02 compatibility fields.
-            "status": status.lower(),
+            "status": "qualified" if status == "ELIGIBLE" else "below_threshold" if status == "NOT_ELIGIBLE" else "blocked",
             "qualifying_quantity": net,
             "source_lines": invoice_evidence,
             "refund_lines": refund_evidence,
@@ -390,6 +404,7 @@ class DistributorSchemeCalculator(models.AbstractModel):
         ] + product_domain
         reversals = moves.search(reversal_domain, order="id")
         seen = set()
+        reversed_credit_quantities = defaultdict(float)
         for move in reversals:
             origin_refund = move.reversed_entry_id
             origin_invoice = origin_refund.reversed_entry_id
@@ -427,6 +442,15 @@ class DistributorSchemeCalculator(models.AbstractModel):
                 continue
             quantity = self._normalize_purchase_quantity(reverse_line, scheme, exceptions)
             if quantity is not None:
+                credit_quantity = self._normalize_purchase_quantity(credit_lines[0], scheme, exceptions)
+                if credit_quantity is None:
+                    continue
+                reversed_credit_quantities[credit_lines[0].id] += quantity
+                if float_compare(reversed_credit_quantities[credit_lines[0].id], credit_quantity,
+                                 precision_digits=self._quantity_precision()) > 0:
+                    self._exception(exceptions, "CREDIT_NOTE_REVERSAL_EXCEEDS_CREDIT", "BLOCKING", _(
+                        "Posted reversals exceed the quantity of their source credit note. Review the accounting records."
+                    ))
                 refund_quantity -= quantity
                 refund_evidence.append(self._build_line_evidence(
                     move, reverse_line, -quantity, "CREDIT_NOTE_REVERSAL", origin=origin_refund
