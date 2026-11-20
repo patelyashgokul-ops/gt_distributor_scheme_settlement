@@ -2,7 +2,7 @@
 import io
 from datetime import timedelta
 
-from odoo import api, fields, models, _, SUPERUSER_ID
+from odoo import api, fields, models, _
 from odoo.exceptions import AccessError, UserError, ValidationError
 
 
@@ -80,6 +80,10 @@ class DistributorSchemeDashboard(models.TransientModel):
         claims = claim_model.search(domain, order="id", limit=REPORT_LIMIT + 1)
         if len(claims) > REPORT_LIMIT:
             raise UserError(_("The dashboard scope exceeds 5,000 claims. Narrow the filters and retry."))
+        for claim in claims:
+            claim._check_snapshot_integrity()
+            if claim.state in APPROVED_STATES:
+                claim._check_approval_evidence()
         unresolved_adjustment_claims = self.env["gt.distributor.scheme.claim.adjustment"].search([
             ("company_id", "=", company.id), ("status", "in", ["open", "under_review", "blocked", "reviewed"]),
             ("claim_id", "in", claims.ids or [0]),
@@ -96,6 +100,8 @@ class DistributorSchemeDashboard(models.TransientModel):
         scheme_domain = [("company_id", "=", company.id), ("state", "=", "active")]
         if self.scheme_id:
             scheme_domain.append(("id", "=", self.scheme_id.id))
+        if self.distributor_id:
+            scheme_domain.append(("distributor_ids", "in", self.distributor_id.id))
         # Scheme KPI is intentionally independent of claim-created date filters.
         active = self.env["gt.distributor.scheme"].search_count(scheme_domain)
         return {
@@ -141,7 +147,7 @@ class DistributorSchemeReportWizard(models.TransientModel):
 
     def _assert_report_access(self):
         self.ensure_one()
-        DistributorSchemeDashboard._validate_scope(self.env["gt.distributor.scheme.dashboard"], self.company_id.id)
+        self.env["gt.distributor.scheme.dashboard"]._validate_scope(self.company_id.id)
         if self.date_from and self.date_to and self.date_from > self.date_to:
             raise ValidationError(_("Claim Created From must be on or before Claim Created To."))
 
@@ -152,6 +158,10 @@ class DistributorSchemeReportWizard(models.TransientModel):
         records = self.env["gt.distributor.scheme.claim"].search(domain, order="scheme_id, distributor_id, id", limit=REPORT_LIMIT + 1)
         if len(records) > REPORT_LIMIT:
             raise UserError(_("The report exceeds 5,000 claim rows. Narrow the filters and retry."))
+        for claim in records:
+            claim._check_snapshot_integrity()
+            if claim.state in APPROVED_STATES:
+                claim._check_approval_evidence()
         return records
 
     @staticmethod
@@ -172,6 +182,8 @@ class DistributorSchemeReportWizard(models.TransientModel):
             "scheme_id": claim.scheme_id.id, "period_id": claim.period_id.id,
             "distributor_id": claim.distributor_id.id,
             "scheme_name": claim.scheme_id.name, "distributor_name": claim.distributor_id.display_name,
+            "scheme_state": claim.scheme_id.state,
+            "period_start": claim.period_id.date_start, "period_end": claim.period_id.date_end,
             "claim_reference": claim.name, "claim_state": claim.state,
             "source_validation_status": claim.source_validation_status,
             "qualifying_product_name": claim.qualifying_product_id.display_name,
@@ -186,6 +198,11 @@ class DistributorSchemeReportWizard(models.TransientModel):
             "delivered_quantity": claim.fulfilled_quantity if approved else 0.0,
             "returned_quantity": claim.returned_quantity if approved else 0.0,
             "outstanding_quantity": outstanding, "releasable_quantity": deliverable,
+            "fulfillment_order_name": claim.fulfillment_order_id.name or "",
+            "warehouse_name": claim.fulfillment_order_id.warehouse_id.display_name or "",
+            "backorder_pending": bool(claim.fulfillment_order_id.picking_ids.filtered(
+                lambda p: p.picking_type_code == "outgoing" and p.backorder_id and p.state not in ("done", "cancel")
+            )),
             "held": blocked, "adjustment_count": len(adjustments),
         }
 
@@ -296,11 +313,14 @@ class DistributorSchemeReportLine(models.TransientModel):
     report_type = fields.Selection(related="wizard_id.report_type", store=True)
     company_id = fields.Many2one("res.company", readonly=True)
     company_name = fields.Char(readonly=True)
+    scheme_state = fields.Char(readonly=True)
     claim_id = fields.Many2one("gt.distributor.scheme.claim", readonly=True)
     adjustment_id = fields.Many2one("gt.distributor.scheme.claim.adjustment", readonly=True)
     adjustment_reference = fields.Char(readonly=True)
     scheme_id = fields.Many2one("gt.distributor.scheme", readonly=True)
     period_id = fields.Many2one("gt.distributor.scheme.period", readonly=True)
+    period_start = fields.Date(readonly=True)
+    period_end = fields.Date(readonly=True)
     distributor_id = fields.Many2one("res.partner", readonly=True)
     scheme_name = fields.Char(readonly=True)
     scheme_state = fields.Char(readonly=True)
@@ -323,6 +343,9 @@ class DistributorSchemeReportLine(models.TransientModel):
     returned_quantity = fields.Float(readonly=True, digits="Product Unit of Measure")
     outstanding_quantity = fields.Float(readonly=True, digits="Product Unit of Measure")
     releasable_quantity = fields.Float(readonly=True, digits="Product Unit of Measure")
+    fulfillment_order_name = fields.Char(readonly=True)
+    warehouse_name = fields.Char(readonly=True)
+    backorder_pending = fields.Boolean(readonly=True)
     held = fields.Boolean(readonly=True)
     adjustment_count = fields.Integer(readonly=True)
     current_entitlement = fields.Float(readonly=True, digits="Product Unit of Measure")
@@ -356,8 +379,10 @@ class DistributorSchemeReportLine(models.TransientModel):
 
 
 def _spreadsheet_safe_text(value):
-    text = "" if value is None else str(value)
-    probe = text.lstrip("\ufeff\x00\t\r\n \u00a0")
+    original = "" if value is None else str(value)
+    text = "".join(char if ord(char) >= 0x20 or char in "\t\r\n" else "\ufffd" for char in original)
+    leading = "".join(chr(codepoint) for codepoint in range(0x21)) + "\ufeff\u00a0\u200b\u200e\u200f"
+    probe = text.lstrip(leading)
     if probe.startswith(("=", "+", "-", "@")):
         return "'" + text
     return text
@@ -379,7 +404,7 @@ def _report_csv(wizard):
             if kind == "text":
                 out.append(_spreadsheet_safe_text(value))
             elif kind == "number":
-                out.append("" if value is False else format(value or 0, ".12g"))
+                out.append("" if value is False else repr(float(value or 0)))
             elif kind == "date":
                 out.append(fields.Date.to_string(value) if value else "")
             else:
