@@ -237,9 +237,9 @@ Environment: Odoo 20.0 source checkout, PostgreSQL 18 disposable cluster on `127
 | Check | Result | Evidence |
 |---|---|---|
 | P06 syntax and registry/XML/module update | PASS (unsupported interpreter) | `compileall models tests`; Odoo upgrade loaded sale/stock extension models, cron, ACLs, and views without registry/XML errors. `.test/odoo-p06-upgrade.log`. |
-| P01-P05 plus P06 regression suite | PASS (unsupported interpreter) | 65 post-tests, 0 failures, 0 errors, 19,314 SQL queries in 48.31s. `.test/odoo-p06-release-candidate.log`. Covers invoice calculation, source revisions/approvals, P04 close/snapshot, order creation/idempotency, guards, completed delivery and settlement, partial delivery/backorder, late refund blocking, and old foundation regressions. |
-| Over-delivery guard | PASS (targeted) | An attempted 6-unit completed delivery against a 5-unit approved claim is rejected; picking remains incomplete and verified fulfilled quantity stays zero. One targeted test, 0 failures/errors, `.test/odoo-p06-overdelivery.log`. |
-| Return after settlement | NOT RUN | Added real stock-return integration coverage; targeted result is pending at report preparation. |
+| P01-P05 plus P06 regression suite | PASS (unsupported interpreter) | Final post-change run: 67 post-tests, 0 failures, 0 errors, 20,371 SQL queries in 45.24s. `.test/odoo-p06-final-suite.log`. Covers invoice calculations, source revisions/approvals, P04 close/snapshot, order creation/idempotency, completed delivery/settlement, partial delivery/backorder, late refund blocking, over-delivery, linked return after settlement, and existing foundation regressions. |
+| Over-delivery guard | PASS | An attempted 6-unit completed delivery against a 5-unit approved claim is rejected; picking remains incomplete and verified fulfilled quantity stays zero. Targeted `.test/odoo-p06-overdelivery.log`; also included in final suite. |
+| Return after settlement | PASS | Real Odoo `_create_return()` validates a linked 2-unit return after a 5-unit settlement; original outbound and settled timestamp remain, net fulfilled recalculates to 3, and the claim moves to `ADJUSTMENT_REQUIRED` with return adjustment. Targeted `.test/odoo-p06-return4.log`; also included in final suite. |
 | Concurrent order creation / stock completion / settle race | NOT RUN | Database-backed row locks and unique order link are implemented, but no independent-cursor P06 race probe was executed. |
 | Python 3.12/3.13 runtime | NOT RUN | Only Python 3.14.6 was available; do not treat current test passes as supported-runtime verification. |
 | Multi-step routes, serial/lot, tax edge configurations, 1,000 movement benchmark | NOT RUN | P06 tests exercised the installed default one-step route and normal unit goods; these route and scale combinations still need dedicated coverage. |
@@ -254,10 +254,10 @@ Final full suite command:
 
 - **AC-25 approved order linkage: PASS (tested flow).** One authorized order is created, confirmed, zero-priced, and tied to the frozen reward/customer/company/warehouse; repeated call returns the same order. Full tax-jurisdiction matrix is not tested.
 - **AC-26 duplicate prevention: NOT RUN (complete concurrency criterion).** Database uniqueness, row locking, and sequential idempotency are present; concurrent P06 workers/RPC retries have not been exercised with independent PostgreSQL cursors.
-- **AC-27 actual delivered quantity: PASS for completed one-step customer delivery.** Real standard picking completion updates actual quantity and permits settlement; exhaustive internal-route, move-splitting, and return matrices are not complete.
+- **AC-27 actual delivered quantity: PASS for tested one-step delivery and linked return.** Real standard picking completion/return updates net quantity and settlement evidence; exhaustive internal-route and move-splitting matrices are not complete.
 - **AC-28 partial/backorder: PASS (tested).** A real partial picking/backorder leaves outstanding quantity, the backorder completes against the same entitlement, and only then settlement succeeds.
 - **AC-29 late refund: PASS for pre-fulfillment hold.** A posted linked refund detected after approval creates an adjustment, blocks order creation, and preserves approved quantity/hash. Late refunds after partial/full settlement need additional verification.
-- **AC-30 negative/excess settlement: PASS for tested over-delivery attempt; otherwise PARTIAL.** Oversized delivery is blocked. Dedicated negative refund, excess-return, and all historical exposure combinations remain untested.
+- **AC-30 negative/excess settlement: PARTIAL.** Oversized delivery is blocked and a post-settlement return triggers an adjustment without erasing settlement evidence. Dedicated malformed negative entitlement, excess-return, and full historical exposure combinations remain untested.
 
 ### Critical invariant matrix
 
@@ -283,5 +283,5 @@ Final full suite command:
 - Managers must explicitly select a warehouse if their company has more than one. Safe replacement fulfillment after cancellation is intentionally unsupported; unique order history prevents reissue and leaves the claim for controlled correction.
 - A zero sale price does not make a tax rule universally compliant. Nonzero payable totals block, but legal tax treatment remains customer/jurisdiction configuration.
 - The scheduled scan is bounded to 100 claims per company per run and chooses an active manager with accounting read access. Multi-worker queueing, large company backlog paging, and cron performance measurement remain.
-- Return after settlement test outcome, real concurrency probes, internal/multi-step routes, stock return/UoM and tracking matrix, source-scan scale, broad company stock access, and supported Python 3.12/3.13 runs remain before claiming P06 fully complete.
+- Real concurrency probes, internal/multi-step routes, full stock return/UoM and tracking matrix, source-scan scale, broad company stock access, and supported Python 3.12/3.13 runs remain before claiming P06 fully complete.
 - P07: secure reports/exports, dashboards, disclosure/performance hardening, complete regression. P08: upgrade verification, documentation, package and final release checks. Product is not READY TO PUBLISH.
