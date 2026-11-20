@@ -370,10 +370,6 @@ class DistributorSchemeClaim(models.Model):
         original = self._snapshot_entitlement()
         current = self._result_entitlement(result)
         entitlement_changed = any([
-            float_compare(original["gross_quantity"], current["gross_quantity"], precision_digits=12),
-            float_compare(original["refund_quantity"], current["refund_quantity"], precision_digits=12),
-            float_compare(original["net_quantity"], current["net_quantity"], precision_digits=12),
-            original["slab_id"] != current["slab_id"],
             original["reward_product_id"] != current["reward_product_id"],
             float_compare(original["reward_quantity"], current["reward_quantity"], precision_digits=12),
         ])

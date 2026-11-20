@@ -186,7 +186,7 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
         with self.assertRaises(ValidationError):
             period.write({"state": "closed"})
 
-        with self.assertRaises(ValidationError):
+        with self.assertRaises(AccessError):
             self.env["gt.distributor.scheme.claim"].create({
                 "name": "Forged Approval",
                 "scheme_id": self.scheme.id,
