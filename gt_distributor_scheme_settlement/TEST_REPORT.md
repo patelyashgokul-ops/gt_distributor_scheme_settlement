@@ -67,17 +67,17 @@ Odoo reported `0 failed, 0 error(s) of 11 tests` in `.test/odoo-p02-rerun.log`. 
 
 | Check | Result | Evidence |
 |---|---|---|
-| Clean install, registry, wizard view and ACL load | PASS (Python 3.14.6 unsupported) | Fresh disposable database `gt_scheme_p03_test`; Odoo loaded the addon, new transient model, ACL rows, and preview XML. The initial full run then exposed test defects; the final module update run below passed. |
-| P01/P02 regression and P03 ORM suite | PASS (Python 3.14.6 unsupported) | Odoo final result: `0 failed, 0 error(s) of 28 tests`; module test statistics: 30 tests. `.test/odoo-p03-rerun.log`. |
+| Clean install, registry, wizard view and ACL load | PASS (Python 3.14.6 unsupported) | Fresh disposable database `gt_scheme_p03_test`; Odoo loaded the addon, new transient model, ACL rows, and preview XML in the final clean install run. |
+| P01/P02 regression and P03 ORM suite | PASS (Python 3.14.6 unsupported) | 28 addon test methods started. Odoo final result: `0 failed, 0 error(s) of 30 tests`; module test statistics: 30 tests. `.test/odoo-p03-final.log`. |
 | Python syntax / XML / manifest | PASS | 15 Python files parsed, 8 XML files parsed, manifest literal loaded using Python 3.14.6 after final source changes. |
 | P03 production Python support | NOT RUN | Only Python 3.14.6 was available; Odoo 20 source declares Python 3.12–3.13. |
-| Large-volume performance benchmark | NOT RUN | No 1,000-line or representative distributor-volume benchmark was executed. Final Odoo run reported 6,970 module-stat queries across tests, not a performance benchmark. |
+| Large-volume performance benchmark | NOT RUN | No 1,000-line or representative distributor-volume benchmark was executed. Final Odoo module test stats reported 6,303 queries; that is not a performance benchmark. |
 | Real concurrent preview/source-write test | NOT RUN | Repeatable-read behavior was verified in source; tests were sequential and do not establish concurrency behavior under parallel requests. |
 
 Final passing command (PowerShell; isolated UTF-8 PostgreSQL 18 cluster, port 55498; disposable DB and filestore only):
 
 ```powershell
-& C:\PycharmProjects\odoo20\.venv\Scripts\python.exe C:\PycharmProjects\odoo20\odoo-20.0\odoo-bin --addons-path=C:\PycharmProjects\odoo20\odoo-20.0\odoo\addons,C:\PycharmProjects\odoo20\custom_addons --data-dir=C:\PycharmProjects\odoo20\custom_addons\gt_distributor_scheme_settlement\.test\odoo-data --db_host=127.0.0.1 --db_port=55498 --db_user=odoo_test --db_password= --database=gt_scheme_p03_test --update=gt_distributor_scheme_settlement --without-demo --test-enable --test-tags=/gt_distributor_scheme_settlement --stop-after-init --http-port=8095 --logfile=C:\PycharmProjects\odoo20\custom_addons\gt_distributor_scheme_settlement\.test\odoo-p03-rerun.log
+& C:\PycharmProjects\odoo20\.venv\Scripts\python.exe C:\PycharmProjects\odoo20\odoo-20.0\odoo-bin --addons-path=C:\PycharmProjects\odoo20\odoo-20.0\odoo\addons,C:\PycharmProjects\odoo20\custom_addons --data-dir=C:\PycharmProjects\odoo20\custom_addons\gt_distributor_scheme_settlement\.test\odoo-data --db_host=127.0.0.1 --db_port=55498 --db_user=odoo_test --db_password= --database=gt_scheme_p03_test --init=gt_distributor_scheme_settlement --without-demo --test-enable --test-tags=/gt_distributor_scheme_settlement --stop-after-init --http-port=8095 --logfile=C:\PycharmProjects\odoo20\custom_addons\gt_distributor_scheme_settlement\.test\odoo-p03-final.log
 ```
 
 ### Acceptance matrix
