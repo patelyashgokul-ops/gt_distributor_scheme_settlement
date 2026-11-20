@@ -67,10 +67,10 @@ Odoo reported `0 failed, 0 error(s) of 11 tests` in `.test/odoo-p02-rerun.log`. 
 | Check | Result | Evidence |
 |---|---|---|
 | Clean install, registry, wizard view and ACL load | PASS (Python 3.14.6 unsupported) | Fresh disposable database `gt_scheme_p03_test`; Odoo loaded the addon, new transient model, ACL rows, and preview XML. The initial full run then exposed test defects; the final module update run below passed. |
-| P01/P02 regression and P03 ORM suite | PASS (Python 3.14.6 unsupported) | Odoo final result: `0 failed, 0 error(s) of 27 tests`; module test statistics: 29 tests (Odoo framework accounting differs by two from the result summary). `.test/odoo-p03-rerun.log`. |
+| P01/P02 regression and P03 ORM suite | PASS (Python 3.14.6 unsupported) | Odoo final result: `0 failed, 0 error(s) of 28 tests`; module test statistics: 29 tests. `.test/odoo-p03-rerun.log`. |
 | Python syntax / XML / manifest | PASS | 15 Python files parsed, 8 XML files parsed, manifest literal loaded using Python 3.14.6 after final source changes. |
 | P03 production Python support | NOT RUN | Only Python 3.14.6 was available; Odoo 20 source declares Python 3.12–3.13. |
-| Large-volume performance benchmark | NOT RUN | No 1,000-line or representative distributor-volume benchmark was executed. Final Odoo run reported 6,774 module-stat queries across tests, not a performance benchmark. |
+| Large-volume performance benchmark | NOT RUN | No 1,000-line or representative distributor-volume benchmark was executed. Final Odoo run reported 6,970 module-stat queries across tests, not a performance benchmark. |
 | Real concurrent preview/source-write test | NOT RUN | Repeatable-read behavior was verified in source; tests were sequential and do not establish concurrency behavior under parallel requests. |
 
 Final passing command (PowerShell; isolated UTF-8 PostgreSQL 18 cluster, port 55498; disposable DB and filestore only):
@@ -103,11 +103,11 @@ Final passing command (PowerShell; isolated UTF-8 PostgreSQL 18 cluster, port 55
 - **AC-03 company isolation and authorization:** PASS (Python 3.14.6 unsupported) — ACLs, Odoo 20 company-scoped `ir.access` domains, and cross-company checks covered by addon tests.
 - **AC-04 immutable audit/evidence:** PASS (Python 3.14.6 unsupported) — audit modification restrictions covered by tests; source and adjustment evidence are append-only at ORM level.
 - **AC-05 native views and menu references:** PASS (Python 3.14.6 unsupported) — Odoo view schemas and menu/action references loaded successfully; test verifies key external IDs.
-- **AC-06 no unimplemented workflow claims:** PASS - no calculation action is exposed in the UI; the P02 calculator is a permission-checked, non-persisting service only. No claim-close, approval, fulfillment, or settlement operation is exposed; claim lifecycle and metadata writes remain server-blocked.
+- **AC-06 no unimplemented workflow claims:** PASS - no calculation action is exposed in the UI; the P02/P03 calculator is a permission-checked, non-persisting service and the P03 preview wizard is read-only. No claim-close, approval, fulfillment, or settlement operation is exposed; claim lifecycle and metadata writes remain server-blocked.
 
 ## Security limitations and deferred work
 
 - Odoo superuser mode intentionally bypasses access controls. Future privileged services need their own explicit authorization and invariant checks.
 - Full multi-company access combinations, import/RPC vectors, and concurrent attempts still require targeted runtime tests. Tests used the discovered unsupported Python 3.14.6 runtime. A broad Odoo core test run also hit an unrelated core attachment memory assertion, so the successful run was filtered to this addon.
-- Period closing, claim generation, immutable document snapshot capture, stale evidence detection, manager approval, zero-priced sales orders, delivery reconciliation, and late-return adjustment workflow remain deferred to P03–P08. P02's calculator is non-persisting; refunds linked outside the requested period raise a review exception instead of being adjusted automatically.
-- The addon now includes a non-persisting P02 purchase calculator, but period closing through settlement remains unfinished; it is not ready to publish.
+- P03 provides read-only eligibility previews only. Period closing, claim generation, immutable document snapshot capture, stale claim revalidation, manager approval, zero-priced sales orders, delivery reconciliation, and late-return adjustment workflow remain deferred to P04–P08.
+- The addon is not ready to publish; supported-Python validation and deferred concurrency/performance work remain.

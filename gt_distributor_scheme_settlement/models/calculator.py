@@ -148,6 +148,10 @@ class DistributorSchemeCalculator(models.AbstractModel):
                 continue
             if not self._source_is_available_at_cutoff(refund, cutoff, exceptions, scheme.qualifying_product_id):
                 continue
+            if refund.invoice_date and refund.invoice_date > cutoff.date():
+                # Invoice date is the effective accounting date; a future-dated
+                # credit note must not reduce a preview before that date.
+                continue
             origin_lines = origin.line_ids.filtered(
                 lambda line: line.display_type == "product" and line.product_id == scheme.qualifying_product_id
             ).sorted("id")
@@ -466,6 +470,7 @@ class DistributorSchemeCalculator(models.AbstractModel):
         return {
             "company_id": move.company_id.id,
             "distributor_id": move.commercial_partner_id.id,
+            "partner_id": move.partner_id.id,
             "move_id": move.id,
             "move_name": move.name,
             "move_type": move.move_type,
@@ -479,11 +484,13 @@ class DistributorSchemeCalculator(models.AbstractModel):
             "source_quantity": line.quantity,
             "normalized_quantity": qualifying_quantity,
             "line_subtotal": line.price_subtotal,
+            "currency_id": move.currency_id.id,
             "line_classification": classification or ("QUALIFYING" if qualifying_quantity else "ZERO_VALUE"),
             "source_write_date": fields.Datetime.to_string(line.write_date) if line.write_date else False,
             "source_role": role,
             "origin_move_id": origin.id if origin else False,
             "reversed_entry_id": origin.id if role == "CREDIT_NOTE" and origin else False,
+            "attribution_status": "LINKED_UNAMBIGUOUS" if role in ("CREDIT_NOTE", "CREDIT_NOTE_REVERSAL") else "NOT_APPLICABLE",
         }
 
     @api.model
