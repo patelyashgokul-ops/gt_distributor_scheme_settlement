@@ -6,3 +6,4 @@ from . import claim
 from . import claim_source
 from . import claim_adjustment
 from . import audit
+from . import calculator
