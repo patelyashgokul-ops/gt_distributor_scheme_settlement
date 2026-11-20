@@ -423,6 +423,39 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
         self.assertEqual(claim.fulfilled_quantity, 5)
         self.assertEqual(claim.outstanding_quantity, 0)
 
+    def test_p06_fulfillment_rejects_another_company_warehouse(self):
+        claim = self._p06_approved_claim("P06-CROSS-COMPANY-WH", reward=5)
+        warehouse_b = self.env["stock.warehouse"].search([("company_id", "=", self.company_b.id)], limit=1)
+        self.assertTrue(warehouse_b, "Company B test warehouse was not initialized")
+        with self.assertRaises((AccessError, ValidationError)):
+            claim.with_user(self.manager).action_prepare_free_goods_fulfillment(warehouse_b.id)
+        self.assertFalse(claim.fulfillment_order_id)
+        self.assertEqual(claim.state, "approved")
+
+    def test_p06_serial_tracked_reward_uses_standard_lot_delivery_lines(self):
+        self.reward_a.product_tmpl_id.tracking = "serial"
+        claim = self._p06_approved_claim("P06-SERIAL", reward=2)
+        order, warehouse = self._p06_prepare_order(claim)
+        serials = self.env["stock.lot"].create([
+            {"name": f"P06-{claim.id}-SN-1", "product_id": claim.approved_reward_product_id.id,
+             "company_id": claim.company_id.id},
+            {"name": f"P06-{claim.id}-SN-2", "product_id": claim.approved_reward_product_id.id,
+             "company_id": claim.company_id.id},
+        ])
+        for serial in serials:
+            self.env["stock.quant"]._update_available_quantity(
+                claim.approved_reward_product_id, warehouse.lot_stock_id, 1, lot_id=serial
+            )
+        picking = order.picking_ids.filtered(lambda item: item.picking_type_code == "outgoing")
+        picking.action_assign()
+        self.assertEqual(len(picking.move_line_ids), 2)
+        self.assertEqual(set(picking.move_line_ids.lot_id.ids), set(serials.ids))
+        picking.move_line_ids.picked = True
+        picking.button_validate()
+        claim.invalidate_recordset()
+        self.assertEqual(claim.fulfilled_quantity, 2)
+        self.assertEqual(claim.outstanding_quantity, 0)
+
     def test_p05_manager_approves_current_claim_and_freezes_entitlement(self):
         claim = self._p05_reviewable_claim("P05-APPROVE")
         picking_count = self.env["stock.picking"].search_count([])
