@@ -199,6 +199,81 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
         with self.assertRaises(AccessError):
             claim.with_user(self.operator).action_approve_claim()
 
+    def test_p05_company_a_manager_cannot_read_or_approve_company_b_claim(self):
+        company_b_manager = self.env["res.users"].create({
+            "name": "Scheme Test Company B Manager",
+            "login": "scheme-foundation-company-b-manager",
+            "company_id": self.company_b.id,
+            "company_ids": [(6, 0, [self.company_b.id])],
+            "group_ids": [(6, 0, [
+                self.env.ref("base.group_user").id,
+                self.env.ref("gt_distributor_scheme_settlement.group_scheme_manager").id,
+                self.env.ref("account.group_account_readonly").id,
+            ])],
+        })
+        company_b_operator = self.env["res.users"].create({
+            "name": "Scheme Test Company B Operator",
+            "login": "scheme-foundation-company-b-operator",
+            "company_id": self.company_b.id,
+            "company_ids": [(6, 0, [self.company_b.id])],
+            "group_ids": [(6, 0, [
+                self.env.ref("base.group_user").id,
+                self.env.ref("gt_distributor_scheme_settlement.group_scheme_operator").id,
+                self.env.ref("account.group_account_readonly").id,
+            ])],
+        })
+        income = self.env["account.account"].create({
+            "name": "P05 Company B Revenue", "code": "P05BREV",
+            "account_type": "income", "company_ids": [(6, 0, [self.company_b.id])],
+        })
+        receivable = self.env["account.account"].create({
+            "name": "P05 Company B Receivable", "code": "P05BRCV",
+            "account_type": "asset_receivable", "reconcile": True,
+            "company_ids": [(6, 0, [self.company_b.id])],
+        })
+        self.distributor.with_company(self.company_b).property_account_receivable_id = receivable
+        journal = self.env["account.journal"].with_company(self.company_b).create({
+            "name": "P05 Company B Sales", "type": "sale", "code": "P05B",
+            "company_id": self.company_b.id, "default_account_id": income.id,
+        })
+        scheme = self.env["gt.distributor.scheme"].with_company(self.company_b).create({
+            "name": "P05 Company B Scheme", "code": "P05-COMPANY-B",
+            "company_id": self.company_b.id, "qualifying_product_id": self.product_b.id,
+            "reward_product_id": self.product_b.id, "distributor_ids": [(4, self.distributor.id)],
+            "date_start": "2026-01-01", "date_end": "2026-12-31",
+            "qualifying_uom_id": self.product_b.uom_id.id,
+        })
+        self.env["gt.distributor.scheme.slab"].with_company(self.company_b).create({
+            "scheme_id": scheme.id, "minimum_quantity": 1, "reward_quantity": 1,
+        })
+        scheme.with_user(company_b_manager).with_company(self.company_b).action_activate()
+        period = self.env["gt.distributor.scheme.period"].with_user(company_b_manager).with_company(self.company_b).create({
+            "name": "P05 Company B Period", "scheme_id": scheme.id,
+            "date_start": "2026-01-01", "date_end": "2026-01-31",
+            "calculation_cutoff": fields.Datetime.now(),
+        })
+        invoice = self.env["account.move"].with_company(self.company_b).create({
+            "move_type": "out_invoice", "company_id": self.company_b.id,
+            "journal_id": journal.id, "partner_id": self.distributor.id,
+            "invoice_date": "2026-01-10",
+            "invoice_line_ids": [(0, 0, {
+                "name": "Company B qualifying purchase", "product_id": self.product_b.id,
+                "product_uom_id": self.product_b.uom_id.id, "quantity": 10,
+                "price_unit": 10, "account_id": income.id,
+            })],
+        })
+        invoice.action_post()
+        period.write({"calculation_cutoff": fields.Datetime.now()})
+        period.with_user(company_b_manager).with_company(self.company_b).action_close_period()
+        claim = period.claim_ids
+        claim.with_user(company_b_operator).with_company(self.company_b).action_submit()
+        claim.with_user(company_b_manager).with_company(self.company_b).action_start_review()
+        self.assertEqual(self.env["gt.distributor.scheme.claim"].with_user(self.manager).search_count([("id", "=", claim.id)]), 0)
+        with self.assertRaises(AccessError):
+            claim.with_user(self.independent_manager).action_approve_claim()
+        self.assertEqual(claim.state, "under_review")
+        self.assertFalse(claim.approved_by_id)
+
     def test_p05_stale_source_blocks_approval_even_when_reward_is_unchanged(self):
         claim = self._p05_reviewable_claim("P05-STALE-SOURCE")
         original_hash = claim.snapshot_hash
