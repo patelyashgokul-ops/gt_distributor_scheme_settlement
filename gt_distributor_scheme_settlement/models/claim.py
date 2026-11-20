@@ -147,7 +147,7 @@ class DistributorSchemeClaim(models.Model):
                 raise ValidationError(_("Claim and scheme must belong to the same company."))
             if rec.period_id and (rec.period_id.scheme_id != rec.scheme_id or rec.period_id.company_id != rec.company_id):
                 raise ValidationError(_("Claim period must belong to the selected scheme and company."))
-            if rec.period_id and rec.period_id.state != "closed":
+            if rec.period_id and rec.period_id.state != "closed" and self.env.context.get("_gt_claim_create_token") is not CLAIM_CREATE_TOKEN:
                 raise ValidationError(_("A claim can only belong to a closed scheme period."))
             if rec.distributor_id and rec.distributor_id not in rec.scheme_id.distributor_ids:
                 raise ValidationError(_("The distributor must be eligible for the selected scheme."))

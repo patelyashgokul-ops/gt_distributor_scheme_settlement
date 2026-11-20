@@ -58,7 +58,7 @@ class DistributorSchemeClaimSource(models.Model):
             line = rec.invoice_line_id
             move = rec.move_id
             claim = rec.claim_id
-            if claim.period_id.state != "closed":
+            if claim.period_id.state != "closed" and self.env.context.get("_gt_claim_source_token") is not CLAIM_CREATE_TOKEN:
                 raise ValidationError(_("Source allocations require a closed scheme period."))
             if rec.scheme_id != claim.scheme_id or rec.period_id != claim.period_id or rec.distributor_id != claim.distributor_id or rec.company_id != claim.company_id:
                 raise ValidationError(_("Source allocation ownership must match its claim."))

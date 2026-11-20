@@ -1,30 +1,30 @@
 id,name,model_id,group_id/id,operation,domain
-access_scheme_company,Distributor schemes: allowed companies,gt.distributor.scheme,,crud,"[('company_id', 'in', company_ids)]"
+access_scheme_company,Distributor schemes: allowed companies,gt.distributor.scheme,,r,"[('company_id', 'in', company_ids)]"
 access_scheme_operator,scheme operator,gt.distributor.scheme,gt_distributor_scheme_settlement.group_scheme_operator,r,
 access_scheme_manager,scheme manager,gt.distributor.scheme,gt_distributor_scheme_settlement.group_scheme_manager,crud,
 access_scheme_auditor,scheme auditor,gt.distributor.scheme,gt_distributor_scheme_settlement.group_scheme_auditor,r,
-access_slab_company,Distributor scheme slabs: allowed companies,gt.distributor.scheme.slab,,crud,"[('company_id', 'in', company_ids)]"
+access_slab_company,Distributor scheme slabs: allowed companies,gt.distributor.scheme.slab,,r,"[('company_id', 'in', company_ids)]"
 access_slab_operator,slab operator,gt.distributor.scheme.slab,gt_distributor_scheme_settlement.group_scheme_operator,r,
 access_slab_manager,slab manager,gt.distributor.scheme.slab,gt_distributor_scheme_settlement.group_scheme_manager,crud,
 access_slab_auditor,slab auditor,gt.distributor.scheme.slab,gt_distributor_scheme_settlement.group_scheme_auditor,r,
-access_period_company,Distributor scheme periods: allowed companies,gt.distributor.scheme.period,,crud,"[('company_id', 'in', company_ids)]"
+access_period_company,Distributor scheme periods: allowed companies,gt.distributor.scheme.period,,r,"[('company_id', 'in', company_ids)]"
 access_period_operator,period operator,gt.distributor.scheme.period,gt_distributor_scheme_settlement.group_scheme_operator,r,
 access_period_manager,period manager,gt.distributor.scheme.period,gt_distributor_scheme_settlement.group_scheme_manager,crud,
 access_period_auditor,period auditor,gt.distributor.scheme.period,gt_distributor_scheme_settlement.group_scheme_auditor,r,
-access_claim_company,Distributor scheme claims: allowed companies,gt.distributor.scheme.claim,,crud,"[('company_id', 'in', company_ids)]"
-access_claim_operator,claim operator,gt.distributor.scheme.claim,gt_distributor_scheme_settlement.group_scheme_operator,cru,
+access_claim_company,Distributor scheme claims: allowed companies,gt.distributor.scheme.claim,,r,"[('company_id', 'in', company_ids)]"
+access_claim_operator,claim operator,gt.distributor.scheme.claim,gt_distributor_scheme_settlement.group_scheme_operator,ru,
 access_claim_manager,claim manager,gt.distributor.scheme.claim,gt_distributor_scheme_settlement.group_scheme_manager,crud,
 access_claim_auditor,claim auditor,gt.distributor.scheme.claim,gt_distributor_scheme_settlement.group_scheme_auditor,r,
-access_source_company,Claim source evidence: allowed companies,gt.distributor.scheme.claim.source,,crud,"[('company_id', 'in', company_ids)]"
-access_source_operator,source operator,gt.distributor.scheme.claim.source,gt_distributor_scheme_settlement.group_scheme_operator,cr,
+access_source_company,Claim source evidence: allowed companies,gt.distributor.scheme.claim.source,,r,"[('company_id', 'in', company_ids)]"
+access_source_operator,source operator,gt.distributor.scheme.claim.source,gt_distributor_scheme_settlement.group_scheme_operator,r,
 access_source_manager,source manager,gt.distributor.scheme.claim.source,gt_distributor_scheme_settlement.group_scheme_manager,cr,
 access_source_auditor,source auditor,gt.distributor.scheme.claim.source,gt_distributor_scheme_settlement.group_scheme_auditor,r,
-access_adjustment_company,Claim adjustments: allowed companies,gt.distributor.scheme.claim.adjustment,,crud,"[('company_id', 'in', company_ids)]"
+access_adjustment_company,Claim adjustments: allowed companies,gt.distributor.scheme.claim.adjustment,,r,"[('company_id', 'in', company_ids)]"
 access_adjustment_operator,adjustment operator,gt.distributor.scheme.claim.adjustment,gt_distributor_scheme_settlement.group_scheme_operator,r,
 access_adjustment_manager,adjustment manager,gt.distributor.scheme.claim.adjustment,gt_distributor_scheme_settlement.group_scheme_manager,crud,
 access_adjustment_auditor,adjustment auditor,gt.distributor.scheme.claim.adjustment,gt_distributor_scheme_settlement.group_scheme_auditor,r,
-access_audit_company,Distributor scheme audit: allowed companies,gt.distributor.scheme.audit,,crud,"[('company_id', 'in', company_ids)]"
-access_audit_operator,audit operator,gt.distributor.scheme.audit,gt_distributor_scheme_settlement.group_scheme_operator,r,
+access_audit_company,Distributor scheme audit: allowed companies,gt.distributor.scheme.audit,,r,"[('company_id', 'in', company_ids)]"
+access_audit_operator,audit operator,gt.distributor.scheme.audit,gt_distributor_scheme_settlement.group_scheme_operator,cr,
 access_audit_manager,audit manager,gt.distributor.scheme.audit,gt_distributor_scheme_settlement.group_scheme_manager,cr,
 access_audit_auditor,audit auditor,gt.distributor.scheme.audit,gt_distributor_scheme_settlement.group_scheme_auditor,r,
 access_preview_operator,scheme preview operator,gt.distributor.scheme.preview.wizard,gt_distributor_scheme_settlement.group_scheme_operator,cru,
