@@ -112,7 +112,7 @@ class DistributorSchemeCalculator(models.AbstractModel):
 
     @api.model
     def _convert_quantity(self, quantity, source_uom, target_uom):
-        if not source_uom or not target_uom or source_uom.category_id != target_uom.category_id:
+        if not source_uom or not target_uom or not source_uom._has_common_reference(target_uom):
             raise ValidationError(_("Invoice line UoM is incompatible with the scheme qualifying UoM."))
         return source_uom._compute_quantity(quantity, target_uom, round=False)
 

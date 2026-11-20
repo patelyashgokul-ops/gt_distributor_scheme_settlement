@@ -6,6 +6,12 @@ from odoo.addons.account.tests.common import AccountTestInvoicingCommon
 @tagged("post_install", "-at_install")
 class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
     @classmethod
+    def get_default_groups(cls):
+        return super().get_default_groups() | cls.env.ref(
+            "gt_distributor_scheme_settlement.group_scheme_manager"
+        )
+
+    @classmethod
     def setUpClass(cls):
         super().setUpClass()
         cls.company_a = cls.env.company
