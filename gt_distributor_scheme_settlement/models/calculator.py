@@ -483,6 +483,7 @@ class DistributorSchemeCalculator(models.AbstractModel):
             "source_write_date": fields.Datetime.to_string(line.write_date) if line.write_date else False,
             "source_role": role,
             "origin_move_id": origin.id if origin else False,
+            "reversed_entry_id": origin.id if role == "CREDIT_NOTE" and origin else False,
         }
 
     @api.model

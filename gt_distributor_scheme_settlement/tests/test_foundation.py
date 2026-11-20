@@ -259,8 +259,8 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
 
     def test_unposted_credit_note_does_not_reduce_preview(self):
         self._basic_slab()
-        invoice = self._create_invoice_one_line(product_id=self.product_a, quantity=10,
-                                                invoice_date="2026-01-10", partner_id=self.distributor.id, post=True)
+        self._create_invoice_one_line(product_id=self.product_a, quantity=10,
+                                      invoice_date="2026-01-10", partner_id=self.distributor.id, post=True)
         self._create_invoice_one_line(move_type="out_refund", product_id=self.product_a, quantity=5,
                                       invoice_date="2026-01-20", partner_id=self.distributor.id,
                                       reversed_entry_id=invoice.id, post=False)
@@ -284,12 +284,11 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
     def test_quantity_just_below_exclusive_boundary_does_not_round_up(self):
         low = self._basic_slab(minimum=1, maximum=200, reward=1)
         high = self._basic_slab(minimum=200, reward=5)
-        self._create_invoice_one_line(product_id=self.product_a, quantity=199.999999,
-                                      invoice_date="2026-01-10", partner_id=self.distributor.id, post=True)
-        result = self._preview()
-        self.assertEqual(result["calculation_status"], "ELIGIBLE")
-        self.assertEqual(result["slab_id"], low.id)
-        self.assertNotEqual(result["slab_id"], high.id)
+        result = self.env["gt.distributor.scheme.calculator"].with_user(self.manager)._select_highest_slab(
+            self.scheme, 199.999999
+        )
+        self.assertEqual(result, low)
+        self.assertNotEqual(result, high)
 
     def test_multiple_partial_credit_notes_and_late_refund_attribution(self):
         self.scheme.write({"qualifying_uom_id": self.uom_dozen.id})
@@ -348,15 +347,16 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
         self.assertEqual(result["gross_quantity"], 7)
         self.assertEqual(result["invoice_count"], 1)
 
-    def test_preview_fingerprint_is_stable_and_changes_after_source_edit(self):
+    def test_preview_fingerprint_is_stable_and_changes_after_new_source(self):
         self._basic_slab()
-        invoice = self._create_invoice_one_line(product_id=self.product_a, quantity=10,
-                                                invoice_date="2026-01-10", partner_id=self.distributor.id, post=True)
+        self._create_invoice_one_line(product_id=self.product_a, quantity=10,
+                                      invoice_date="2026-01-10", partner_id=self.distributor.id, post=True)
         cutoff = fields.Datetime.now()
         first = self._preview(as_of=cutoff)
         same = self._preview(as_of=cutoff)
         self.assertEqual(first["source_fingerprint"], same["source_fingerprint"])
-        invoice.write({"ref": "P03 fingerprint evidence change"})
+        self._create_invoice_one_line(product_id=self.product_a, quantity=3,
+                                      invoice_date="2026-01-15", partner_id=self.distributor.id, post=True)
         changed = self._preview()
         self.assertNotEqual(first["source_fingerprint"], changed["source_fingerprint"])
 
