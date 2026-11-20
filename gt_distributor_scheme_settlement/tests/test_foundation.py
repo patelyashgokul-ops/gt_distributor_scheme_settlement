@@ -246,8 +246,8 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
         self.env["gt.distributor.scheme.slab"].with_company(self.company_b).create({
             "scheme_id": scheme.id, "minimum_quantity": 1, "reward_quantity": 1,
         })
-        scheme.with_user(company_b_manager).with_company(self.company_b).action_activate()
-        period = self.env["gt.distributor.scheme.period"].with_user(company_b_manager).with_company(self.company_b).create({
+        scheme.with_user(company_b_manager).with_context(allowed_company_ids=[self.company_b.id]).action_activate()
+        period = self.env["gt.distributor.scheme.period"].with_user(company_b_manager).with_context(allowed_company_ids=[self.company_b.id]).create({
             "name": "P05 Company B Period", "scheme_id": scheme.id,
             "date_start": "2026-01-01", "date_end": "2026-01-31",
             "calculation_cutoff": fields.Datetime.now(),
@@ -264,10 +264,10 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
         })
         invoice.action_post()
         period.write({"calculation_cutoff": fields.Datetime.now()})
-        period.with_user(company_b_manager).with_company(self.company_b).action_close_period()
+        period.with_user(company_b_manager).with_context(allowed_company_ids=[self.company_b.id]).action_close_period()
         claim = period.claim_ids
-        claim.with_user(company_b_operator).with_company(self.company_b).action_submit()
-        claim.with_user(company_b_manager).with_company(self.company_b).action_start_review()
+        claim.with_user(company_b_operator).with_context(allowed_company_ids=[self.company_b.id]).action_submit()
+        claim.with_user(company_b_manager).with_context(allowed_company_ids=[self.company_b.id]).action_start_review()
         self.assertEqual(self.env["gt.distributor.scheme.claim"].with_user(self.manager).search_count([("id", "=", claim.id)]), 0)
         with self.assertRaises(AccessError):
             claim.with_user(self.independent_manager).action_approve_claim()
