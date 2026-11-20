@@ -14,6 +14,14 @@ from .service_tokens import SOURCE_GUARD_TOKEN
 class AccountMove(models.Model):
     _inherit = "account.move"
 
+    @api.model_create_multi
+    def create(self, vals_list):
+        moves = super().create(vals_list)
+        self._gt_lock_scheme_move_scopes(moves.filtered(
+            lambda move: move.state == "posted" and move.move_type in ("out_invoice", "out_refund")
+        ))
+        return moves
+
     @api.model
     def _gt_lock_scheme_source_scope(self, company_id, distributor_id):
         if not company_id or not distributor_id:
@@ -63,10 +71,17 @@ class AccountMove(models.Model):
     def write(self, vals):
         if self.env.context.get("_gt_source_guard_token") is not SOURCE_GUARD_TOKEN:
             relevant = self.filtered(
-                lambda move: move.state == "posted" and move.move_type in ("out_invoice", "out_refund")
+                lambda move: (move.state == "posted" or vals.get("state") == "posted")
+                and vals.get("move_type", move.move_type) in ("out_invoice", "out_refund")
             )
             if relevant:
                 self._gt_lock_scheme_move_scopes(relevant)
+                if vals.get("partner_id") or vals.get("company_id"):
+                    for move in relevant:
+                        self._gt_lock_scheme_source_scope(
+                            vals.get("company_id", move.company_id.id),
+                            self.env["res.partner"].browse(vals.get("partner_id", move.partner_id.id)).commercial_partner_id.id,
+                        )
         return super().write(vals)
 
 
