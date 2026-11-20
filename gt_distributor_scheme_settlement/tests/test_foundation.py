@@ -17,19 +17,16 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
             name="Scheme Test Qualifying Product",
             company_id=cls.company_a.id,
             uom_id=cls.uom_unit.id,
-            uom_po_id=cls.uom_unit.id,
         )
         cls.reward_a = cls._create_product(
             name="Scheme Test Reward Product",
             company_id=cls.company_a.id,
             uom_id=cls.uom_unit.id,
-            uom_po_id=cls.uom_unit.id,
         )
         cls.product_b = cls._create_product(
             name="Scheme Test Company B Product",
             company_id=cls.company_b.id,
             uom_id=cls.uom_unit.id,
-            uom_po_id=cls.uom_unit.id,
         )
         cls.distributor = cls.env["res.partner"].create({
             "name": "Scheme Test Distributor",
