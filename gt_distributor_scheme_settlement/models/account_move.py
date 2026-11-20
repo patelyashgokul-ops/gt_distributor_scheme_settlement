@@ -5,7 +5,8 @@ against period closing and claim approval. It does not cover raw SQL or
 external database writers.
 """
 
-from odoo import api, fields, models
+from odoo import _, api, fields, models
+from odoo.exceptions import UserError
 
 from .service_tokens import SOURCE_GUARD_TOKEN
 
@@ -26,15 +27,21 @@ class AccountMove(models.Model):
             return
         now = fields.Datetime.to_string(fields.Datetime.now())
         uid = self.env.uid
-        self.env.cr.execute(
-            "INSERT INTO gt_distributor_scheme_source_guard "
-            "(company_id, distributor_id, version, create_uid, create_date, write_uid, write_date) "
-            "VALUES (%s, %s, 1, %s, %s, %s, %s) "
-            "ON CONFLICT (company_id, distributor_id) DO UPDATE SET "
-            "version = gt_distributor_scheme_source_guard.version + 1, "
-            "write_uid = EXCLUDED.write_uid, write_date = EXCLUDED.write_date",
-            [company_id, distributor_id, uid, now, uid, now],
-        )
+        try:
+            with self.env.cr.savepoint():
+                self.env.cr.execute(
+                    "INSERT INTO gt_distributor_scheme_source_guard "
+                    "(company_id, distributor_id, version, create_uid, create_date, write_uid, write_date) "
+                    "VALUES (%s, %s, 1, %s, %s, %s, %s) "
+                    "ON CONFLICT (company_id, distributor_id) DO UPDATE SET "
+                    "version = gt_distributor_scheme_source_guard.version + 1, "
+                    "write_uid = EXCLUDED.write_uid, write_date = EXCLUDED.write_date",
+                    [company_id, distributor_id, uid, now, uid, now],
+                )
+        except Exception as error:
+            if error.__class__.__name__ == "SerializationFailure":
+                raise UserError(_("A concurrent accounting source update is in progress for this distributor. Retry after it finishes.")) from error
+            raise
 
     @api.model
     def _gt_lock_scheme_move_scopes(self, moves):

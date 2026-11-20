@@ -86,6 +86,8 @@ class DistributorScheme(models.Model):
         if not self.reward_product_id.uom_id:
             raise ValidationError(_("The reward product must have a unit of measure."))
         super(DistributorScheme, self).write({"state": "active"})
+        for distributor_id in sorted(set(self.distributor_ids.mapped("commercial_partner_id").ids)):
+            self.env["account.move"]._gt_lock_scheme_source_scope(self.company_id.id, distributor_id)
         self.env["gt.distributor.scheme.audit"]._record_event({
             "company_id": self.company_id.id,
             "scheme_id": self.id,
