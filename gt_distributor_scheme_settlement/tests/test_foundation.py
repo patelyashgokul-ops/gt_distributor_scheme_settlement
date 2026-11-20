@@ -155,8 +155,8 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
         period.with_user(self.manager).write({"calculation_cutoff": fields.Datetime.now()})
         return period.with_user(self.manager).action_close_period()
 
-    def _p05_reviewable_claim(self, code="P05-CLAIM"):
-        _scheme, period = self._p04_scheme_period(code=code)
+    def _p05_reviewable_claim(self, code="P05-CLAIM", slabs=((1, False, 1),)):
+        _scheme, period = self._p04_scheme_period(code=code, slabs=slabs)
         self._create_invoice_one_line(product_id=self.product_a, quantity=10,
                                       invoice_date="2026-01-10", partner_id=self.distributor.id, post=True)
         self._close_p04(period)
@@ -213,7 +213,7 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
         self.assertFalse(claim.approved_by_id)
 
     def test_p05_changed_entitlement_blocks_approval(self):
-        claim = self._p05_reviewable_claim("P05-STALE-ENTITLEMENT")
+        claim = self._p05_reviewable_claim("P05-STALE-ENTITLEMENT", slabs=((1, 11, 1), (11, False, 2)))
         self._create_invoice_one_line(product_id=self.product_a, quantity=25,
                                       invoice_date="2026-01-12", partner_id=self.distributor.id, post=True)
         claim.with_user(self.independent_manager).action_approve_claim()

@@ -1,5 +1,4 @@
 import hashlib
-import json
 
 from odoo import api, fields, models, _
 from odoo.exceptions import AccessError, ValidationError
@@ -83,5 +82,5 @@ class DistributorSchemeClaimRevision(models.Model):
 
     @api.model
     def _hash_payload(self, payload):
-        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        canonical = self.env["gt.distributor.scheme.claim"]._canonical_json(payload)
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
