@@ -452,6 +452,28 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
         self.assertEqual(result["calculation_status"], "ELIGIBLE")
         self.assertEqual(self.env["gt.distributor.scheme.claim"].search_count([]), claims_before)
 
+    def test_preview_handles_one_thousand_relevant_invoice_lines(self):
+        """Exercise a realistic line volume through real accounting ORM records."""
+        self._basic_slab(minimum=1, reward=1)
+        lines = [
+            self._prepare_invoice_line(product_id=self.product_a, quantity=1)
+            for _index in range(1000)
+        ]
+        invoice = self._create_invoice(
+            invoice_date="2026-01-10",
+            post=True,
+            partner_id=self.distributor.id,
+            invoice_line_ids=lines,
+        )
+        result = self._preview()
+        matching_sources = [
+            row for row in result["invoice_sources"] if row["move_id"] == invoice.id
+        ]
+        self.assertEqual(result["calculation_status"], "ELIGIBLE")
+        self.assertEqual(result["gross_quantity"], 1000)
+        self.assertEqual(len(matching_sources), 1000)
+        self.assertEqual(result["invoice_count"], 1)
+
     def test_preview_wizard_results_cannot_be_forged_by_orm_write(self):
         wizard = self.env["gt.distributor.scheme.preview.wizard"].with_user(self.manager).create({
             "scheme_id": self.scheme.id,
@@ -554,6 +576,10 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
         scoped = self.env["gt.distributor.scheme"].with_user(self.operator)
         self.assertIn(self.scheme, scoped.search([]))
         self.assertNotIn(other_scheme, scoped.search([]))
+        with self.assertRaises(AccessError):
+            self.env["gt.distributor.scheme.calculator"].with_user(self.manager).calculate_eligibility(
+                other_scheme.id, self.distributor.id, "2026-01-01", "2026-01-31", fields.Datetime.now()
+            )
         with self.assertRaises(AccessError):
             self.env["gt.distributor.scheme"].with_user(self.manager).browse(self.scheme.id).write({"company_id": self.company_b.id})
 
