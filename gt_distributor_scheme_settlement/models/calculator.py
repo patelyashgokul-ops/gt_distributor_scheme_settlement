@@ -94,7 +94,7 @@ class DistributorSchemeCalculator(models.AbstractModel):
         eligible_invoice_lines = defaultdict(list)
         gross_parts = []
         for move in invoices:
-            if not self._source_is_available_at_cutoff(move, cutoff, exceptions):
+            if not self._source_is_available_at_cutoff(move, cutoff, exceptions, scheme.qualifying_product_id):
                 continue
             move_lines = move.line_ids.filtered(
                 lambda line: line.display_type == "product" and line.product_id == scheme.qualifying_product_id
@@ -146,7 +146,7 @@ class DistributorSchemeCalculator(models.AbstractModel):
                     "A qualifying credit note does not match the scheme company and distributor. Review its attribution."
                 ))
                 continue
-            if not self._source_is_available_at_cutoff(refund, cutoff, exceptions):
+            if not self._source_is_available_at_cutoff(refund, cutoff, exceptions, scheme.qualifying_product_id):
                 continue
             origin_lines = origin.line_ids.filtered(
                 lambda line: line.display_type == "product" and line.product_id == scheme.qualifying_product_id
@@ -326,13 +326,13 @@ class DistributorSchemeCalculator(models.AbstractModel):
         return moves.search(domain, order="invoice_date, id")
 
     @api.model
-    def _source_is_available_at_cutoff(self, move, cutoff, exceptions):
+    def _source_is_available_at_cutoff(self, move, cutoff, exceptions, product):
         if move.create_date and move.create_date > cutoff or move.write_date and move.write_date > cutoff:
             self._exception(exceptions, "SOURCE_CHANGED_AFTER_CUTOFF", "BLOCKING", _(
                 "A currently posted source document was created or modified after the selected cutoff; Odoo has no prior line version to reproduce this historical preview."
             ))
             return False
-        for line in move.line_ids.filtered(lambda item: item.display_type == "product"):
+        for line in move.line_ids.filtered(lambda item: item.display_type == "product" and item.product_id == product):
             if line.create_date and line.create_date > cutoff or line.write_date and line.write_date > cutoff:
                 self._exception(exceptions, "SOURCE_LINE_CHANGED_AFTER_CUTOFF", "BLOCKING", _(
                     "A currently posted source line was created or modified after the selected cutoff; historical line values cannot be reconstructed."
@@ -436,12 +436,16 @@ class DistributorSchemeCalculator(models.AbstractModel):
                 ))
                 continue
             seen.add(reverse_line.id)
-            if not self._source_is_available_at_cutoff(move, cutoff, exceptions):
+            if not self._source_is_available_at_cutoff(move, cutoff, exceptions, scheme.qualifying_product_id):
                 continue
             if self._classify_product_line(reverse_line, exceptions) != "QUALIFYING":
                 continue
             quantity = self._normalize_purchase_quantity(reverse_line, scheme, exceptions)
             if quantity is not None:
+                if not self._source_is_available_at_cutoff(origin_refund, cutoff, exceptions, scheme.qualifying_product_id):
+                    continue
+                if self._classify_product_line(credit_lines[0], exceptions) != "QUALIFYING":
+                    continue
                 credit_quantity = self._normalize_purchase_quantity(credit_lines[0], scheme, exceptions)
                 if credit_quantity is None:
                     continue
