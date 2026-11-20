@@ -1,6 +1,6 @@
 from odoo import api, fields, models, _
 from odoo.exceptions import AccessError
-from .service_tokens import AUDIT_CREATE_TOKEN
+from .service_tokens import AUDIT_CREATE_TOKEN, AUDIT_SYSTEM_TOKEN
 
 
 class DistributorSchemeAudit(models.Model):
@@ -38,6 +38,15 @@ class DistributorSchemeAudit(models.Model):
         )):
             raise AccessError(_("You are not authorized to record scheme audit events."))
         return self.with_context(_gt_audit_service_token=AUDIT_CREATE_TOKEN).create(values_list)
+
+    @api.model
+    def _record_system_event_for_actor(self, values, actor_id, token=None):
+        if token is not AUDIT_SYSTEM_TOKEN:
+            raise AccessError(_("System audit events require an internal verified workflow."))
+        actor = self.env["res.users"].browse(actor_id).exists()
+        if not actor:
+            raise AccessError(_("The actor for this fulfillment event is unavailable."))
+        return self.with_user(actor).sudo().with_context(_gt_audit_service_token=AUDIT_CREATE_TOKEN).create(values)
 
     @api.constrains("scheme_id", "claim_id", "company_id")
     def _check_company_relations(self):

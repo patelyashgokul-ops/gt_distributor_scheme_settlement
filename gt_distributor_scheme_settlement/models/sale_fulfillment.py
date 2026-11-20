@@ -80,7 +80,7 @@ class SaleOrder(models.Model):
             if claim._has_blocking_adjustments():
                 raise UserError(_("A blocking claim adjustment prevents order confirmation."))
             validation = claim._active_validation()
-            if validation["status"] != "current":
+            if not claim._p06_reviewed_source_change_is_safe(validation):
                 claim.action_revalidate_sources()
                 return claim._p06_notification(_("Order confirmation blocked"), _("Claim sources changed after approval. Review the adjustment before confirming fulfillment."), "warning")
         result = super().action_confirm()

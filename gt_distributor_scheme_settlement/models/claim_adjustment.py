@@ -43,6 +43,7 @@ class DistributorSchemeClaimAdjustment(models.Model):
     reviewed_by_id = fields.Many2one("res.users", readonly=True)
     reviewed_at = fields.Datetime(readonly=True)
     review_note = fields.Text(readonly=True)
+    detected_by_id = fields.Many2one("res.users", required=True, readonly=True, ondelete="restrict")
     created_by_id = fields.Many2one("res.users", required=True, default=lambda self: self.env.user, readonly=True)
 
     _claim_fingerprint_uniq = models.Constraint(
@@ -54,7 +55,8 @@ class DistributorSchemeClaimAdjustment(models.Model):
         if self.env.context.get("_gt_adjustment_token") is not ADJUSTMENT_TOKEN:
             raise AccessError(_("Adjustment evidence can only be created by the authorized reconciliation service."))
         for vals in vals_list:
-            vals["created_by_id"] = self.env.user.id
+            vals.setdefault("detected_by_id", self.env.user.id)
+            vals["created_by_id"] = vals["detected_by_id"]
         return super().create(vals_list)
 
     @api.constrains("quantity_delta", "reason", "claim_id", "source_move_id")

@@ -57,6 +57,9 @@
                     <button name="action_finalize_settlement" type="object" string="Finalize Settlement" class="btn-primary"
                             groups="gt_distributor_scheme_settlement.group_scheme_manager"
                             invisible="state != 'fulfillment_in_progress'"/>
+                    <button name="action_resume_fulfillment" type="object" string="Resume Reviewed Fulfillment"
+                            groups="gt_distributor_scheme_settlement.group_scheme_manager"
+                            invisible="state != 'adjustment_required'"/>
                     <field name="state" widget="statusbar" statusbar_visible="draft,submitted,under_review,approved,rejected,fulfillment_in_progress,settled,adjustment_required" readonly="1"/>
                 </header>
                 <sheet>

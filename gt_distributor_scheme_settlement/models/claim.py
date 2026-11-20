@@ -294,6 +294,7 @@ class DistributorSchemeClaim(models.Model):
             "remaining_undelivered_quantity": metrics["outstanding"],
             "potential_excess_fulfillment": max(metrics["net"] - current_reward, 0.0),
             "validation_status": validation["status"], "evidence_payload": validation,
+            "detected_by_id": self.env.context.get("_gt_p06_actor_id") or self.env.user.id,
             "status": "blocked" if validation["status"] == "blocked" else "open",
         })
         return adjustment
@@ -342,7 +343,7 @@ class DistributorSchemeClaim(models.Model):
                 if self._has_blocking_adjustments():
                     raise UserError(_("Fulfillment is blocked by an unresolved claim adjustment."))
                 validation = self._active_validation()
-                if validation["status"] != "current":
+                if not self._p06_reviewed_source_change_is_safe(validation):
                     self._store_revalidation(validation)
                     self._record_p06_adjustment(validation)
                     self.with_context(_gt_claim_write_token=CLAIM_WRITE_TOKEN).write({"state": "adjustment_required"})
@@ -462,12 +463,16 @@ class DistributorSchemeClaim(models.Model):
             self.company_id.id, self.distributor_id.commercial_partner_id.id
         )
         validation = self._active_validation()
-        if validation["status"] != "current":
+        if not self._p06_reviewed_source_change_is_safe(validation):
             self._store_revalidation(validation)
             self._record_p06_adjustment(validation)
             if self.state != "adjustment_required":
                 self.with_context(_gt_claim_write_token=CLAIM_WRITE_TOKEN).write({"state": "adjustment_required"})
             return self._p06_notification(_("Reconciliation blocked"), _("Accounting source changes require manager review."), "warning")
+        if self._has_blocking_adjustments():
+            if self.state != "adjustment_required":
+                self.with_context(_gt_claim_write_token=CLAIM_WRITE_TOKEN).write({"state": "adjustment_required"})
+            return self._p06_notification(_("Reconciliation blocked"), _("A material fulfillment adjustment remains unresolved."), "warning")
         metrics = self._fulfillment_metrics()
         if metrics["net"] < -1e-9 or self.approved_reward_uom_id.compare(metrics["net"], self.approved_reward_quantity) > 0:
             fingerprint = hashlib.sha256(f"over:{self.id}:{metrics['net']:.12f}".encode()).hexdigest()
@@ -484,7 +489,7 @@ class DistributorSchemeClaim(models.Model):
                 })
             self.with_context(_gt_claim_write_token=CLAIM_WRITE_TOKEN).write({"state": "adjustment_required"})
             return self._p06_notification(_("Fulfillment exception"), _("Reconciliation found an over-delivery or negative result. The evidence was preserved and settlement is blocked pending review."), "danger")
-        if self.state not in ("settled", "adjustment_required"):
+        if self.state != "settled":
             self.with_context(_gt_claim_write_token=CLAIM_WRITE_TOKEN).write({"state": "fulfillment_in_progress"})
         return metrics
 
@@ -1194,7 +1199,7 @@ class DistributorSchemeClaim(models.Model):
                 "calculation_fingerprint": result["source_fingerprint"],
                 "exception_codes": sorted({item["code"] for item in result["exceptions"]}),
             }
-                if not self._p06_reviewed_source_change_is_safe(validation):
+        if validation["status"] != "current":
             self._store_revalidation(validation)
             if revision:
                 revision.with_context(_gt_revision_write_token=REVISION_WRITE_TOKEN).write({
@@ -1367,7 +1372,7 @@ class DistributorSchemeClaim(models.Model):
         if self.period_id.state != "closed":
             raise UserError(_("Claims can be submitted only after their period is closed."))
         validation = self._active_validation()
-        if not self._p06_reviewed_source_change_is_safe(validation):
+        if validation["status"] != "current":
             self._store_revalidation(validation)
             return self._blocked_action_message(validation)
         self.with_context(_gt_claim_write_token=CLAIM_WRITE_TOKEN).write({

@@ -3,7 +3,7 @@ import hashlib
 from odoo import _, api, models
 from odoo.exceptions import AccessError, UserError, ValidationError
 
-from .service_tokens import ADJUSTMENT_TOKEN, CLAIM_WRITE_TOKEN, STOCK_DONE_TOKEN
+from .service_tokens import ADJUSTMENT_TOKEN, AUDIT_SYSTEM_TOKEN, CLAIM_WRITE_TOKEN, STOCK_DONE_TOKEN
 
 
 class StockMove(models.Model):
@@ -63,7 +63,8 @@ class StockMove(models.Model):
 
     def _action_done(self, cancel_backorder=False):
         scoped = self.filtered(lambda move: move._scheme_claim_for_p06())
-        claims = scoped.mapped(lambda move: move._scheme_claim_for_p06()).sorted("id")
+        claim_ids = sorted({move._scheme_claim_for_p06().id for move in scoped})
+        claims = self.env["gt.distributor.scheme.claim"].sudo().browse(claim_ids)
         if claims:
             self.env.cr.execute(
                 "SELECT id FROM gt_distributor_scheme_claim WHERE id = ANY(%s) ORDER BY id FOR UPDATE",
@@ -95,7 +96,7 @@ class StockMove(models.Model):
                     if claim._has_blocking_adjustments():
                         raise UserError(_("An unresolved adjustment blocks this reward delivery."))
                     validation = self._p06_stock_source_validation(claim)
-                    if validation["status"] != "current":
+                    if not claim._p06_reviewed_source_change_is_safe(validation):
                         raise UserError(_("Delivery blocked: claim accounting sources changed after approval. Ask a scheme manager to review the adjustment."))
                     metrics = claim._fulfillment_metrics()
                     add_qty = sum(move.uom_id._compute_quantity(move.quantity, claim.approved_reward_uom_id, round=False) for move in outgoing)
@@ -117,7 +118,7 @@ class StockMove(models.Model):
                 fingerprint = hashlib.sha256(
                     f"reward-return:{claim.id}:{','.join(map(str, sorted(returns.ids)))}:{qty:.12f}".encode()
                 ).hexdigest()
-                adjustment_model = self.env["gt.distributor.scheme.claim.adjustment"]
+                adjustment_model = self.env["gt.distributor.scheme.claim.adjustment"].sudo()
                 if not adjustment_model.search_count([("claim_id", "=", claim.id), ("fingerprint", "=", fingerprint)]):
                     adjustment_model.with_context(_gt_adjustment_token=ADJUSTMENT_TOKEN).create({
                         "claim_id": claim.id, "quantity_delta": -qty,
@@ -131,12 +132,20 @@ class StockMove(models.Model):
                         "validation_status": claim.source_validation_status,
                         "evidence_payload": {"return_move_ids": sorted(returns.ids), "returned_quantity": qty,
                                              "uom_id": claim.approved_reward_uom_id.id},
+                        "detected_by_id": self.env.uid,
                         "status": "open",
                     })
                 updates["state"] = "adjustment_required"
             elif claim.state in ("approved", "fulfillment_in_progress"):
                 updates["state"] = "fulfillment_in_progress"
             claim.with_context(_gt_claim_write_token=CLAIM_WRITE_TOKEN).write(updates)
+            self.env["gt.distributor.scheme.audit"]._record_system_event_for_actor({
+                "company_id": claim.company_id.id, "scheme_id": claim.scheme_id.id, "claim_id": claim.id,
+                "event_type": "claim_stock_fulfillment_reconciled",
+                "evidence": {"claim_id": claim.id, "picking_ids": sorted(pickings.ids),
+                             "outbound_move_ids": sorted(moves.filtered(lambda m: m.location_dest_id.usage == "customer").ids),
+                             "return_move_ids": sorted(returns.ids), "claim_state": claim.state},
+            }, self.env.uid, token=AUDIT_SYSTEM_TOKEN)
         return result
 
 
