@@ -28,12 +28,16 @@ class DistributorSchemeAudit(models.Model):
 
     @api.model
     def _record_event(self, values):
+        return self._record_event_multi([values])
+
+    @api.model
+    def _record_event_multi(self, values_list):
         if not any(self.env.user.has_group(group) for group in (
             "gt_distributor_scheme_settlement.group_scheme_operator",
             "gt_distributor_scheme_settlement.group_scheme_manager",
         )):
             raise AccessError(_("You are not authorized to record scheme audit events."))
-        return self.with_context(_gt_audit_service_token=AUDIT_CREATE_TOKEN).create(values)
+        return self.with_context(_gt_audit_service_token=AUDIT_CREATE_TOKEN).create(values_list)
 
     @api.constrains("scheme_id", "claim_id", "company_id")
     def _check_company_relations(self):
