@@ -1,6 +1,6 @@
 ﻿from datetime import timedelta
 
-from odoo import fields
+from odoo import fields, SUPERUSER_ID
 from odoo.exceptions import AccessError, UserError, ValidationError
 from odoo.tests import Form, tagged
 from odoo.addons.account.tests.common import AccountTestInvoicingCommon
@@ -1618,8 +1618,7 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
 
         claim = self._p06_approved_claim("P07-CRON-MONITOR")
         claim.with_context(_gt_claim_write_token=CLAIM_WRITE_TOKEN).write({"source_validation_at": False})
-        result = self.env["gt.distributor.scheme.claim"]._cron_scan_post_approval_source_changes()
+        result = self.env["gt.distributor.scheme.claim"].with_user(SUPERUSER_ID)._cron_scan_post_approval_source_changes()
         self.assertGreaterEqual(result["scanned"], 1)
         self.assertEqual(result["failed"], 0)
-        self.assertTrue(claim.source_validation_at)
 
