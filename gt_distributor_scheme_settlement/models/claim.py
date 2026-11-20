@@ -8,7 +8,8 @@ from odoo.exceptions import AccessError, UserError, ValidationError
 from odoo.tools.float_utils import float_compare
 
 from .service_tokens import (
-    CLAIM_CREATE_TOKEN, CLAIM_WRITE_TOKEN, REVISION_CREATE_TOKEN, REVISION_WRITE_TOKEN,
+    ADJUSTMENT_TOKEN, CLAIM_CREATE_TOKEN, CLAIM_WRITE_TOKEN, FULFILLMENT_TOKEN,
+    REVISION_CREATE_TOKEN, REVISION_WRITE_TOKEN, SETTLEMENT_TOKEN,
 )
 
 
@@ -95,6 +96,21 @@ class DistributorSchemeClaim(models.Model):
     approved_at = fields.Datetime(readonly=True, copy=False)
     fulfillment_order_id = fields.Many2one("sale.order", readonly=True, copy=False, check_company=True)
     fulfillment_picking_ids = fields.Many2many("stock.picking", string="Fulfillment Transfers", readonly=True, copy=False)
+    fulfillment_order_created_at = fields.Datetime(readonly=True, copy=False)
+    fulfillment_order_created_by_id = fields.Many2one("res.users", readonly=True, copy=False)
+    fulfilled_quantity = fields.Float(compute="_compute_fulfillment_metrics", compute_sudo=True, digits="Product Unit of Measure", string="Delivered Quantity")
+    returned_quantity = fields.Float(compute="_compute_fulfillment_metrics", compute_sudo=True, digits="Product Unit of Measure", string="Returned Quantity")
+    net_fulfilled_quantity = fields.Float(compute="_compute_fulfillment_metrics", compute_sudo=True, digits="Product Unit of Measure", string="Net Fulfilled Quantity")
+    outstanding_quantity = fields.Float(compute="_compute_fulfillment_metrics", compute_sudo=True, digits="Product Unit of Measure", string="Outstanding Quantity")
+    fulfillment_status = fields.Selection([
+        ("not_started", "Not Started"), ("pending", "Pending"), ("partial", "Partially Delivered"),
+        ("complete", "Fully Delivered"), ("exception", "Exception"),
+    ], compute="_compute_fulfillment_metrics", compute_sudo=True, string="Fulfillment Status")
+    settled_by_id = fields.Many2one("res.users", readonly=True, copy=False)
+    settled_at = fields.Datetime(readonly=True, copy=False)
+    reconciliation_fingerprint = fields.Char(readonly=True, copy=False, index=True)
+    settlement_evidence = fields.Json(readonly=True, copy=False)
+    settlement_evidence_hash = fields.Char(readonly=True, copy=False, index=True)
     source_ids = fields.One2many("gt.distributor.scheme.claim.source", "claim_id", string="Source Evidence", readonly=True)
     invoice_source_ids = fields.One2many("gt.distributor.scheme.claim.source", "claim_id", string="Invoice Sources", domain=[("source_role", "=", "invoice")], readonly=True)
     refund_source_ids = fields.One2many("gt.distributor.scheme.claim.source", "claim_id", string="Refund Sources", domain=[("source_role", "=", "refund")], readonly=True)
@@ -129,6 +145,8 @@ class DistributorSchemeClaim(models.Model):
         "approved_source_fingerprint", "approved_snapshot_fingerprint", "approval_evidence",
         "approval_evidence_hash", "fulfillment_order_id", "fulfillment_picking_ids", "source_ids",
         "adjustment_ids", "audit_ids", "invoice_source_ids", "refund_source_ids",
+        "fulfillment_order_created_at", "fulfillment_order_created_by_id", "settled_by_id", "settled_at",
+        "reconciliation_fingerprint", "settlement_evidence", "settlement_evidence_hash",
     }
 
     @api.model_create_multi
@@ -177,6 +195,285 @@ class DistributorSchemeClaim(models.Model):
     def _compute_snapshot_json(self):
         for claim in self:
             claim.snapshot_json = json.dumps(claim.snapshot_payload or {}, sort_keys=True, indent=2, ensure_ascii=False)
+
+    def _fulfillment_metrics(self):
+        self.ensure_one()
+        approved = self.approved_reward_quantity or 0.0
+        if not self.fulfillment_order_id:
+            return {"outbound": 0.0, "returned": 0.0, "net": 0.0, "outstanding": approved}
+        reward_lines = self.fulfillment_order_id.order_line.filtered(
+            lambda line: line.scheme_claim_id == self and line.is_scheme_reward_line
+        )
+        all_moves = reward_lines.move_ids
+        outgoing = all_moves.filtered(lambda move:
+            move.state == "done" and move.location_dest_id.usage == "customer"
+            and move.location_id.usage != "customer" and not move.origin_returned_move_id
+            and move.company_id == self.company_id and move.product_id == self.approved_reward_product_id
+        )
+        returns = outgoing.returned_move_ids.filtered(lambda move:
+            move.state == "done" and move.location_id.usage == "customer"
+            and move.location_dest_id.usage != "customer" and move.company_id == self.company_id
+            and move.product_id == self.approved_reward_product_id
+        )
+        target_uom = self.approved_reward_uom_id
+        outbound_qty = sum(move.uom_id._compute_quantity(move.quantity, target_uom, round=False) for move in outgoing)
+        return_qty = sum(move.uom_id._compute_quantity(move.quantity, target_uom, round=False) for move in returns)
+        net_qty = outbound_qty - return_qty
+        if self.state == "adjustment_required":
+            status = "exception"
+        elif not self.fulfillment_order_id:
+            status = "not_started"
+        elif net_qty <= 0:
+            status = "pending"
+        elif target_uom.compare(net_qty, approved) < 0:
+            status = "partial"
+        else:
+            status = "complete"
+        return {
+            "outbound": outbound_qty, "returned": return_qty, "net": net_qty,
+            "outstanding": approved - net_qty, "status": status,
+        }
+
+    @api.depends("state", "fulfillment_order_id", "fulfillment_order_id.order_line.move_ids.state",
+                 "fulfillment_order_id.order_line.move_ids.quantity", "fulfillment_order_id.order_line.move_ids.returned_move_ids.state")
+    def _compute_fulfillment_metrics(self):
+        for claim in self:
+            metrics = claim._fulfillment_metrics() if claim.fulfillment_order_id else {
+                "outbound": 0.0, "returned": 0.0, "net": 0.0,
+                "outstanding": claim.approved_reward_quantity or 0.0,
+                "status": "exception" if claim.state == "adjustment_required" else "not_started",
+            }
+            claim.fulfilled_quantity = metrics["outbound"]
+            claim.returned_quantity = metrics["returned"]
+            claim.net_fulfilled_quantity = metrics["net"]
+            claim.outstanding_quantity = metrics["outstanding"]
+            claim.fulfillment_status = metrics["status"]
+
+    def _check_fulfillment_manager(self):
+        self.ensure_one()
+        if not self.env.user.has_group("gt_distributor_scheme_settlement.group_scheme_manager"):
+            raise AccessError(_("Only a scheme manager may authorize free goods fulfillment."))
+        self.check_access("read")
+        if self.company_id != self.env.company or self.company_id not in self.env.companies:
+            raise AccessError(_("Switch to the claim company before managing fulfillment."))
+
+    def _record_p06_adjustment(self, validation):
+        self.ensure_one()
+        current = validation.get("current") or {}
+        approved = self.approved_reward_quantity or 0.0
+        current_reward = current.get("reward_quantity", 0.0) or 0.0
+        category = validation.get("change_category", "source_attribution_unresolved")
+        adjustment_type = "late_refund" if category.startswith("source_changed") else "source_change"
+        metrics = self._fulfillment_metrics()
+        fingerprint_payload = {
+            "claim_id": self.id, "approved_source_fingerprint": self.approved_source_fingerprint,
+            "current_source_fingerprint": validation.get("source_fingerprint"),
+            "category": category, "exception_codes": sorted(validation.get("exception_codes", [])),
+        }
+        fingerprint = hashlib.sha256(self._canonical_json(fingerprint_payload).encode("utf-8")).hexdigest()
+        model = self.env["gt.distributor.scheme.claim.adjustment"]
+        existing = model.search([("claim_id", "=", self.id), ("fingerprint", "=", fingerprint)], limit=1)
+        if existing:
+            return existing
+        adjustment = model.with_context(_gt_adjustment_token=ADJUSTMENT_TOKEN).create({
+            "claim_id": self.id, "adjustment_date": fields.Date.context_today(self),
+            "quantity_delta": current_reward - approved,
+            "reason": _("Post-approval accounting evidence changed: %(category)s", category=category),
+            "adjustment_type": adjustment_type, "fingerprint": fingerprint,
+            "original_source_fingerprint": self.approved_source_fingerprint or "",
+            "current_source_fingerprint": validation.get("source_fingerprint") or "",
+            "original_entitlement": approved, "current_entitlement": current_reward,
+            "already_fulfilled_quantity": metrics["net"],
+            "remaining_undelivered_quantity": metrics["outstanding"],
+            "potential_excess_fulfillment": max(metrics["net"] - current_reward, 0.0),
+            "validation_status": validation["status"], "evidence_payload": validation,
+            "status": "blocked" if validation["status"] == "blocked" else "open",
+        })
+        return adjustment
+
+    def action_open_fulfillment_wizard(self):
+        self.ensure_one()
+        self._check_fulfillment_manager()
+        return {
+            "type": "ir.actions.act_window", "name": _("Prepare Free Goods Fulfillment"),
+            "res_model": "gt.distributor.scheme.fulfillment.wizard", "view_mode": "form", "target": "new",
+            "context": {"default_claim_id": self.id},
+        }
+
+    @api.model
+    def _fulfillment_order_action(self, order):
+        return {"type": "ir.actions.act_window", "name": _("Free Goods Fulfillment"),
+                "res_model": "sale.order", "view_mode": "form", "res_id": order.id}
+
+    def action_prepare_free_goods_fulfillment(self, warehouse_id=None):
+        self.ensure_one()
+        self._check_fulfillment_manager()
+        try:
+            with self.env.cr.savepoint():
+                self.env.cr.execute("SELECT id FROM gt_distributor_scheme_claim WHERE id = %s FOR UPDATE", [self.id])
+                self.invalidate_recordset()
+                self.env["account.move"]._gt_lock_scheme_source_scope(
+                    self.company_id.id, self.distributor_id.commercial_partner_id.id
+                )
+                if self.state not in ("approved", "fulfillment_in_progress"):
+                    raise UserError(_("Only an approved claim can be fulfilled."))
+                if self.fulfillment_order_id:
+                    if self.fulfillment_order_id.scheme_claim_id != self:
+                        raise ValidationError(_("The linked fulfillment order does not match this claim."))
+                    return self._fulfillment_order_action(self.fulfillment_order_id)
+                if not self.approval_evidence or self._hash_snapshot(self.approval_evidence) != self.approval_evidence_hash:
+                    raise ValidationError(_("The approved entitlement evidence failed its integrity check."))
+                if self.approved_reward_quantity <= 0 or not self.approved_reward_product_id or not self.approved_reward_uom_id:
+                    raise ValidationError(_("The approved reward entitlement is incomplete."))
+                if self._has_blocking_adjustments():
+                    raise UserError(_("Fulfillment is blocked by an unresolved claim adjustment."))
+                validation = self._active_validation()
+                if validation["status"] != "current":
+                    self._store_revalidation(validation)
+                    self._record_p06_adjustment(validation)
+                    self.with_context(_gt_claim_write_token=CLAIM_WRITE_TOKEN).write({"state": "adjustment_required"})
+                    return self._p06_notification(_("Fulfillment blocked"), _("Accounting sources changed after approval. The approved entitlement is preserved and an adjustment exception was recorded."), "warning")
+                warehouse = self.env["stock.warehouse"].browse(warehouse_id).exists() if warehouse_id else self.env["stock.warehouse"]
+                if not warehouse:
+                    candidates = self.env["stock.warehouse"].search([("company_id", "=", self.company_id.id)], order="id")
+                    if len(candidates) == 1:
+                        warehouse = candidates
+                    else:
+                        raise ValidationError(_("Select a warehouse belonging to the claim company."))
+                if warehouse.company_id != self.company_id:
+                    raise ValidationError(_("The fulfillment warehouse must belong to the claim company."))
+                order = self.env["sale.order"].with_context(_gt_fulfillment_token=FULFILLMENT_TOKEN).create({
+                    "partner_id": self.distributor_id.id, "company_id": self.company_id.id,
+                    "warehouse_id": warehouse.id, "origin": _("Free Goods Settlement - Claim %(claim)s", claim=self.name),
+                    "scheme_claim_id": self.id, "is_scheme_fulfillment": True,
+                    "order_line": [(0, 0, {
+                        "name": _("Free Goods Settlement - Claim %(claim)s", claim=self.name),
+                        "product_id": self.approved_reward_product_id.id,
+                        "product_uom_qty": self.approved_reward_quantity,
+                        "product_uom_id": self.approved_reward_uom_id.id, "price_unit": 0.0,
+                        "scheme_claim_id": self.id, "is_scheme_reward_line": True,
+                    })],
+                })
+                self.with_context(_gt_claim_write_token=CLAIM_WRITE_TOKEN).write({
+                    "fulfillment_order_id": order.id, "fulfillment_order_created_at": fields.Datetime.now(),
+                    "fulfillment_order_created_by_id": self.env.user.id,
+                })
+                order._check_scheme_fulfillment_integrity()
+                if order.currency_id.compare_amounts(order.amount_total, 0.0):
+                    raise UserError(_("The configured tax/pricing rules create a payable amount on this zero-priced reward order. Review configuration before fulfillment."))
+                order.with_context(_gt_fulfillment_token=FULFILLMENT_TOKEN).action_confirm()
+                pickings = order.picking_ids
+                self.with_context(_gt_claim_write_token=CLAIM_WRITE_TOKEN).write({
+                    "state": "fulfillment_in_progress", "fulfillment_picking_ids": [(6, 0, pickings.ids)],
+                })
+                self.env["gt.distributor.scheme.audit"]._record_event({
+                    "company_id": self.company_id.id, "scheme_id": self.scheme_id.id, "claim_id": self.id,
+                    "event_type": "claim_fulfillment_order_created",
+                    "evidence": {"claim_id": self.id, "order_id": order.id, "warehouse_id": warehouse.id,
+                                 "reward_product_id": self.approved_reward_product_id.id,
+                                 "approved_quantity": self.approved_reward_quantity, "uom_id": self.approved_reward_uom_id.id},
+                })
+                return self._fulfillment_order_action(order)
+        except Exception as error:
+            if error.__class__.__name__ == "SerializationFailure":
+                raise UserError(_("Fulfillment conflicted with another claim or accounting operation. No order was committed; retry after review.")) from error
+            raise
+
+    def _has_blocking_adjustments(self):
+        self.ensure_one()
+        return bool(self.adjustment_ids.filtered(lambda adjustment:
+            adjustment.status in ("open", "under_review", "blocked") or adjustment.quantity_delta
+        ))
+
+    @api.model
+    def _p06_notification(self, title, message, kind="info"):
+        return {"type": "ir.actions.client", "tag": "display_notification", "params": {
+            "title": title, "message": message, "type": kind, "sticky": True,
+        }}
+
+    def action_reconcile_fulfillment(self):
+        self.ensure_one()
+        self._check_fulfillment_manager()
+        self.env.cr.execute("SELECT id FROM gt_distributor_scheme_claim WHERE id = %s FOR UPDATE", [self.id])
+        self.invalidate_recordset()
+        if not self.fulfillment_order_id:
+            raise UserError(_("This approved claim has no fulfillment order."))
+        metrics = self._fulfillment_metrics()
+        if metrics["net"] < -1e-9 or self.approved_reward_uom_id.compare(metrics["net"], self.approved_reward_quantity) > 0:
+            fingerprint = hashlib.sha256(f"over:{self.id}:{metrics['net']:.12f}".encode()).hexdigest()
+            adjustment = self.env["gt.distributor.scheme.claim.adjustment"].search([("claim_id", "=", self.id), ("fingerprint", "=", fingerprint)], limit=1)
+            if not adjustment:
+                self.env["gt.distributor.scheme.claim.adjustment"].with_context(_gt_adjustment_token=ADJUSTMENT_TOKEN).create({
+                    "claim_id": self.id, "quantity_delta": metrics["net"] - self.approved_reward_quantity,
+                    "reason": _("Verified stock movements exceed or contradict the approved entitlement."),
+                    "adjustment_type": "over_fulfillment", "fingerprint": fingerprint,
+                    "original_entitlement": self.approved_reward_quantity, "current_entitlement": self.approved_reward_quantity,
+                    "already_fulfilled_quantity": metrics["net"], "remaining_undelivered_quantity": metrics["outstanding"],
+                    "potential_excess_fulfillment": max(metrics["net"] - self.approved_reward_quantity, 0.0),
+                    "validation_status": self.source_validation_status, "evidence_payload": metrics, "status": "blocked",
+                })
+            self.with_context(_gt_claim_write_token=CLAIM_WRITE_TOKEN).write({"state": "adjustment_required"})
+            raise UserError(_("Fulfillment reconciliation found an over-delivery or negative result. Review the adjustment before proceeding."))
+        if self.state not in ("settled", "adjustment_required"):
+            self.with_context(_gt_claim_write_token=CLAIM_WRITE_TOKEN).write({"state": "fulfillment_in_progress"})
+        return metrics
+
+    def action_finalize_settlement(self):
+        self.ensure_one()
+        self._check_fulfillment_manager()
+        try:
+            with self.env.cr.savepoint():
+                self.env.cr.execute("SELECT id FROM gt_distributor_scheme_claim WHERE id = %s FOR UPDATE", [self.id])
+                self.invalidate_recordset()
+                if self.state not in ("fulfillment_in_progress", "settled"):
+                    raise UserError(_("Only an in-progress fulfillment can be finalized."))
+                if self.state == "settled" and self.settlement_evidence_hash:
+                    return True
+                validation = self._active_validation()
+                if validation["status"] != "current":
+                    self._store_revalidation(validation)
+                    self._record_p06_adjustment(validation)
+                    self.with_context(_gt_claim_write_token=CLAIM_WRITE_TOKEN).write({"state": "adjustment_required"})
+                    return self._p06_notification(_("Settlement blocked"), _("Accounting sources changed. The original approval and deliveries remain recorded; review the adjustment."), "warning")
+                if self._has_blocking_adjustments():
+                    raise UserError(_("Settlement cannot be finalized while a material adjustment remains unresolved."))
+                metrics = self._fulfillment_metrics()
+                if metrics["net"] < 0 or self.approved_reward_uom_id.compare(metrics["net"], self.approved_reward_quantity) != 0:
+                    raise UserError(_("Settlement requires verified net customer delivery equal to the approved entitlement."))
+                if not self.fulfillment_order_id or self.fulfillment_order_id.state not in ("sale", "done"):
+                    raise UserError(_("A confirmed linked fulfillment order is required."))
+                now = fields.Datetime.now()
+                evidence = {
+                    "version": 1, "claim_id": self.id, "claim_number": self.name,
+                    "company_id": self.company_id.id, "distributor_id": self.distributor_id.id,
+                    "approved_revision_id": self.approved_revision_id.id or False,
+                    "approved_snapshot_fingerprint": self.approved_snapshot_fingerprint,
+                    "approved_source_fingerprint": self.approved_source_fingerprint,
+                    "approved_reward_product_id": self.approved_reward_product_id.id,
+                    "approved_reward_uom_id": self.approved_reward_uom_id.id,
+                    "approved_quantity": self.approved_reward_quantity,
+                    "sale_order_id": self.fulfillment_order_id.id,
+                    "outbound_moves": sorted((move.id, move.quantity, move.uom_id.id) for move in self.fulfillment_order_id.order_line.move_ids.filtered(lambda item: item.state == "done" and item.location_dest_id.usage == "customer" and not item.origin_returned_move_id)),
+                    "return_moves": sorted((move.id, move.quantity, move.uom_id.id) for move in self.fulfillment_order_id.order_line.move_ids.returned_move_ids.filtered(lambda item: item.state == "done")),
+                    "net_fulfilled": metrics["net"], "outstanding": metrics["outstanding"],
+                    "settled_by_id": self.env.user.id, "settled_at": fields.Datetime.to_string(now),
+                }
+                digest = self._hash_snapshot(evidence)
+                fingerprint = hashlib.sha256(self._canonical_json({k: v for k, v in evidence.items() if k not in ("settled_by_id", "settled_at")}).encode()).hexdigest()
+                self.with_context(_gt_claim_write_token=CLAIM_WRITE_TOKEN, _gt_settlement_token=SETTLEMENT_TOKEN).write({
+                    "state": "settled", "settled_by_id": self.env.user.id, "settled_at": now,
+                    "settlement_evidence": evidence, "settlement_evidence_hash": digest,
+                    "reconciliation_fingerprint": fingerprint,
+                })
+                self.env["gt.distributor.scheme.audit"]._record_event({
+                    "company_id": self.company_id.id, "scheme_id": self.scheme_id.id, "claim_id": self.id,
+                    "event_type": "claim_settled", "evidence": {"claim_id": self.id, "evidence_hash": digest, "fingerprint": fingerprint},
+                })
+                return True
+        except Exception as error:
+            if error.__class__.__name__ == "SerializationFailure":
+                raise UserError(_("Settlement conflicted with a concurrent stock or accounting update. No settlement was committed.")) from error
+            raise
 
     @api.constrains("scheme_id", "distributor_id", "period_id", "company_id", "slab_id", "qualifying_product_id")
     def _check_relations(self):
@@ -914,8 +1211,18 @@ class DistributorSchemeClaim(models.Model):
     def action_revalidate_sources(self):
         self.ensure_one()
         self._check_action_access()
+        self.env.cr.execute("SELECT id FROM gt_distributor_scheme_claim WHERE id = %s FOR UPDATE", [self.id])
+        self.invalidate_recordset()
+        if self.state in ("approved", "fulfillment_in_progress", "settled", "adjustment_required"):
+            self.env["account.move"]._gt_lock_scheme_source_scope(
+                self.company_id.id, self.distributor_id.commercial_partner_id.id
+            )
         validation = self._active_validation()
         self._store_revalidation(validation)
+        if validation["status"] != "current" and self.state in ("approved", "fulfillment_in_progress", "settled", "adjustment_required"):
+            self._record_p06_adjustment(validation)
+            if self.state != "adjustment_required":
+                self.with_context(_gt_claim_write_token=CLAIM_WRITE_TOKEN).write({"state": "adjustment_required"})
         if self.active_revision_id and self.active_revision_id.state == "proposed":
             self.active_revision_id.with_context(_gt_revision_write_token=REVISION_WRITE_TOKEN).write({
                 "source_validation_status": validation["status"],
