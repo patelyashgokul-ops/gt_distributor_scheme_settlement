@@ -34,6 +34,8 @@ The preview reads posted customer invoices and linked posted customer credit not
 
 The remaining items are P06–P08 work and are not implemented behavior. Future services must expose explicit success/failure results and be safe under direct ORM/RPC/import and concurrent invocation.
 
+P05 source revalidation and approval coordinate with supported ORM posting/editing of customer invoices and refunds through a database guard row scoped to company and distributor. A source mutation racing with approval causes a safe transaction conflict. Direct SQL or external database writes bypass these Odoo hooks and are outside the addon-level guarantee; production database access must therefore remain restricted.
+
 1. **Ownership and scope:** each claim is for exactly one scheme, scheme-specific period, distributor, and company. Every source invoice, refund, line, claim, adjustment, and fulfillment record must match that company and distributor. Reject cross-company, cross-distributor, out-of-period, or otherwise stale evidence.
 2. **Period and claim policy:** P04 closes periods atomically and idempotently and creates at most one claim per scheme, company, distributor, and period. It persists calculation/source snapshots. Same-period close and cross-scheme source-allocation races passed independent-cursor tests.
 3. **Evidence immutability and adjustments:** P04 protects claim and source snapshots through ORM guards and hashes; database administrators remain outside this application-level guarantee. Corrections append adjustment records; they never rewrite or erase source evidence. Late returns after period close need the P06 adjustment workflow.
