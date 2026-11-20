@@ -1323,8 +1323,15 @@ class DistributorSchemeClaim(models.Model):
         cutoff = fields.Datetime.now() - timedelta(hours=6)
         scanned = flagged = failed = 0
         for company in companies:
+            candidate_domain = [
+                ("company_id", "=", company.id),
+                ("state", "in", ["approved", "fulfillment_in_progress", "settled", "adjustment_required"]),
+                "|", ("source_validation_at", "=", False), ("source_validation_at", "<=", cutoff),
+            ]
+            if not self.search_count(candidate_domain):
+                continue
             managers = self.env["res.users"].search([
-                ("active", "=", True), ("groups_id", "in", manager_group.id),
+                ("active", "=", True), ("group_ids", "in", manager_group.id),
                 ("company_ids", "in", company.id),
             ], order="id", limit=1)
             if not managers:

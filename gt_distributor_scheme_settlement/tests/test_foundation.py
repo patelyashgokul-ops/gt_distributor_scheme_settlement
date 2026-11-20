@@ -1613,3 +1613,13 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
         with self.assertRaises(AccessError):
             attachment.with_user(self.operator).check_access("read")
 
+    def test_p07_scheduled_source_monitor_uses_current_odoo_user_group_api(self):
+        from ..models.service_tokens import CLAIM_WRITE_TOKEN
+
+        claim = self._p06_approved_claim("P07-CRON-MONITOR")
+        claim.with_context(_gt_claim_write_token=CLAIM_WRITE_TOKEN).write({"source_validation_at": False})
+        result = self.env["gt.distributor.scheme.claim"]._cron_scan_post_approval_source_changes()
+        self.assertGreaterEqual(result["scanned"], 1)
+        self.assertEqual(result["failed"], 0)
+        self.assertTrue(claim.source_validation_at)
+
