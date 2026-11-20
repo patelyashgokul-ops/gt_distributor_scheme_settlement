@@ -372,6 +372,62 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
         self.assertEqual(adjustment.potential_excess_fulfillment, 5)
         self.assertEqual(claim.net_fulfilled_quantity, 5)
 
+    def test_p06_two_step_warehouse_internal_pick_is_not_customer_delivery(self):
+        claim = self._p06_approved_claim("P06-TWO-STEP", reward=5)
+        warehouse = self.env["stock.warehouse"].search([("company_id", "=", claim.company_id.id)], limit=1)
+        warehouse.delivery_steps = "pick_ship"
+        order, _warehouse = self._p06_prepare_order(claim)
+        self.env["stock.quant"]._update_available_quantity(
+            claim.approved_reward_product_id, warehouse.lot_stock_id, 5
+        )
+        internal = order.picking_ids.filtered(lambda picking: picking.picking_type_code == "internal")
+        self.assertTrue(internal, "Two-step route should create a warehouse pick transfer")
+        internal.action_assign()
+        internal.move_ids.write({"quantity": 5, "picked": True})
+        internal.button_validate()
+        claim.invalidate_recordset()
+        self.assertEqual(claim.fulfilled_quantity, 0)
+        self.assertEqual(claim.outstanding_quantity, 5)
+        self.assertEqual(claim.state, "fulfillment_in_progress")
+        outgoing = order.picking_ids.filtered(lambda picking: picking.picking_type_code == "outgoing")
+        self.assertTrue(outgoing)
+        outgoing.action_assign()
+        outgoing.move_ids.write({"quantity": 5, "picked": True})
+        outgoing.button_validate()
+        claim.invalidate_recordset()
+        self.assertEqual(claim.fulfilled_quantity, 5)
+        self.assertEqual(claim.outstanding_quantity, 0)
+
+    def test_p06_three_step_warehouse_pick_and_pack_are_not_customer_delivery(self):
+        claim = self._p06_approved_claim("P06-THREE-STEP", reward=5)
+        warehouse = self.env["stock.warehouse"].search([("company_id", "=", claim.company_id.id)], limit=1)
+        warehouse.delivery_steps = "pick_pack_ship"
+        order, _warehouse = self._p06_prepare_order(claim)
+        self.env["stock.quant"]._update_available_quantity(
+            claim.approved_reward_product_id, warehouse.lot_stock_id, 5
+        )
+        processed = self.env["stock.picking"]
+        for _step in range(4):
+            pending = order.picking_ids.filtered(lambda picking: picking.state not in ("done", "cancel")) - processed
+            if not pending:
+                break
+            pending = pending.sorted(lambda picking: (picking.picking_type_id.sequence, picking.id))
+            picking = pending[0]
+            picking.action_assign()
+            self.assertEqual(picking.state, "assigned", f"Picking {picking.name} did not become ready")
+            picking.move_ids.write({"quantity": 5, "picked": True})
+            picking.button_validate()
+            processed |= picking
+            claim.invalidate_recordset()
+            if picking.picking_type_code == "internal":
+                self.assertEqual(claim.fulfilled_quantity, 0)
+                self.assertEqual(claim.outstanding_quantity, 5)
+        outgoing = order.picking_ids.filtered(lambda picking: picking.picking_type_code == "outgoing" and picking.state == "done")
+        self.assertTrue(outgoing)
+        claim.invalidate_recordset()
+        self.assertEqual(claim.fulfilled_quantity, 5)
+        self.assertEqual(claim.outstanding_quantity, 0)
+
     def test_p05_manager_approves_current_claim_and_freezes_entitlement(self):
         claim = self._p05_reviewable_claim("P05-APPROVE")
         picking_count = self.env["stock.picking"].search_count([])
