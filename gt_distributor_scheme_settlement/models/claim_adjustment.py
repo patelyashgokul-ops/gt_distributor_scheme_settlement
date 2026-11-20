@@ -30,6 +30,7 @@ class DistributorSchemeClaimAdjustment(models.Model):
     current_source_fingerprint = fields.Char(readonly=True)
     original_entitlement = fields.Float(readonly=True, digits="Product Unit of Measure")
     current_entitlement = fields.Float(readonly=True, digits="Product Unit of Measure")
+    current_entitlement_known = fields.Boolean(readonly=True)
     already_fulfilled_quantity = fields.Float(readonly=True, digits="Product Unit of Measure")
     remaining_undelivered_quantity = fields.Float(readonly=True, digits="Product Unit of Measure")
     potential_excess_fulfillment = fields.Float(readonly=True, digits="Product Unit of Measure")

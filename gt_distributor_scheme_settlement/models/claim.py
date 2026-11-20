@@ -269,7 +269,7 @@ class DistributorSchemeClaim(models.Model):
         approved = self.approved_reward_quantity or 0.0
         current_reward = current.get("reward_quantity", 0.0) or 0.0
         category = validation.get("change_category", "source_attribution_unresolved")
-        adjustment_type = "late_refund" if category.startswith("source_changed") else "source_change"
+        adjustment_type = "source_change"
         metrics = self._fulfillment_metrics()
         fingerprint_payload = {
             "claim_id": self.id, "approved_source_fingerprint": self.approved_source_fingerprint,
@@ -283,12 +283,13 @@ class DistributorSchemeClaim(models.Model):
             return existing
         adjustment = model.with_context(_gt_adjustment_token=ADJUSTMENT_TOKEN).create({
             "claim_id": self.id, "adjustment_date": fields.Date.context_today(self),
-            "quantity_delta": current_reward - approved,
+            "quantity_delta": current_reward - approved if validation["status"] == "stale" else 0.0,
             "reason": _("Post-approval accounting evidence changed: %(category)s", category=category),
             "adjustment_type": adjustment_type, "fingerprint": fingerprint,
             "original_source_fingerprint": self.approved_source_fingerprint or "",
             "current_source_fingerprint": validation.get("source_fingerprint") or "",
             "original_entitlement": approved, "current_entitlement": current_reward,
+            "current_entitlement_known": validation["status"] == "stale",
             "already_fulfilled_quantity": metrics["net"],
             "remaining_undelivered_quantity": metrics["outstanding"],
             "potential_excess_fulfillment": max(metrics["net"] - current_reward, 0.0),
@@ -395,8 +396,54 @@ class DistributorSchemeClaim(models.Model):
     def _has_blocking_adjustments(self):
         self.ensure_one()
         return bool(self.adjustment_ids.filtered(lambda adjustment:
-            adjustment.status in ("open", "under_review", "blocked") or adjustment.quantity_delta
+            adjustment.status in ("open", "under_review", "blocked")
+            or adjustment.validation_status == "blocked" or adjustment.quantity_delta
         ))
+
+    def _p06_reviewed_source_change_is_safe(self, validation):
+        """Allow only an independently reviewed source change with identical approved reward."""
+        self.ensure_one()
+        if validation.get("status") == "current":
+            return True
+        current = validation.get("current") or {}
+        if (validation.get("status") != "stale"
+            or validation.get("change_category") != "source_changed_entitlement_unchanged"
+            or current.get("reward_product_id") != self.approved_reward_product_id.id
+            or self.approved_reward_uom_id.compare(current.get("reward_quantity", 0.0), self.approved_reward_quantity) != 0):
+            return False
+        return bool(self.adjustment_ids.filtered(lambda adjustment:
+            adjustment.status == "reviewed" and adjustment.validation_status == "stale"
+            and adjustment.current_source_fingerprint == validation.get("source_fingerprint")
+            and adjustment.current_entitlement_known and not adjustment.quantity_delta
+            and adjustment.reviewed_by_id and adjustment.review_note
+        ))
+
+    def action_resume_fulfillment(self):
+        self.ensure_one()
+        self._check_fulfillment_manager()
+        self.env.cr.execute("SELECT id FROM gt_distributor_scheme_claim WHERE id = %s FOR UPDATE", [self.id])
+        self.invalidate_recordset()
+        if self.state != "adjustment_required":
+            raise UserError(_("Only a claim requiring adjustment review can resume fulfillment."))
+        if self._has_blocking_adjustments():
+            raise UserError(_("A material entitlement difference or blocked source attribution remains unresolved."))
+        self.env["account.move"]._gt_lock_scheme_source_scope(
+            self.company_id.id, self.distributor_id.commercial_partner_id.id
+        )
+        validation = self._active_validation()
+        self._store_revalidation(validation)
+        if not self._p06_reviewed_source_change_is_safe(validation):
+            return self._p06_notification(_("Fulfillment remains blocked"), _("Current accounting evidence does not match the reviewed unchanged-entitlement exception."), "warning")
+        state = "fulfillment_in_progress" if self.fulfillment_order_id else "approved"
+        self.with_context(_gt_claim_write_token=CLAIM_WRITE_TOKEN).write({"state": state})
+        self.env["gt.distributor.scheme.audit"]._record_event({
+            "company_id": self.company_id.id, "scheme_id": self.scheme_id.id, "claim_id": self.id,
+            "event_type": "claim_fulfillment_resumed",
+            "evidence": {"claim_id": self.id, "state": state,
+                         "reviewed_source_fingerprint": validation.get("source_fingerprint"),
+                         "adjustment_ids": self.adjustment_ids.filtered(lambda item: item.status == "reviewed").ids},
+        })
+        return True
 
     @api.model
     def _p06_notification(self, title, message, kind="info"):
@@ -453,7 +500,7 @@ class DistributorSchemeClaim(models.Model):
                 if self.state == "settled" and self.settlement_evidence_hash:
                     return True
                 validation = self._active_validation()
-                if validation["status"] != "current":
+                if not self._p06_reviewed_source_change_is_safe(validation):
                     self._store_revalidation(validation)
                     self._record_p06_adjustment(validation)
                     self.with_context(_gt_claim_write_token=CLAIM_WRITE_TOKEN).write({"state": "adjustment_required"})
@@ -1147,7 +1194,7 @@ class DistributorSchemeClaim(models.Model):
                 "calculation_fingerprint": result["source_fingerprint"],
                 "exception_codes": sorted({item["code"] for item in result["exceptions"]}),
             }
-        if validation["status"] != "current":
+                if not self._p06_reviewed_source_change_is_safe(validation):
             self._store_revalidation(validation)
             if revision:
                 revision.with_context(_gt_revision_write_token=REVISION_WRITE_TOKEN).write({
@@ -1320,7 +1367,7 @@ class DistributorSchemeClaim(models.Model):
         if self.period_id.state != "closed":
             raise UserError(_("Claims can be submitted only after their period is closed."))
         validation = self._active_validation()
-        if validation["status"] != "current":
+        if not self._p06_reviewed_source_change_is_safe(validation):
             self._store_revalidation(validation)
             return self._blocked_action_message(validation)
         self.with_context(_gt_claim_write_token=CLAIM_WRITE_TOKEN).write({
