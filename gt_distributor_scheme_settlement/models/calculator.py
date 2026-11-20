@@ -1,6 +1,7 @@
 import hashlib
 import json
 from collections import defaultdict
+from math import fsum
 
 from odoo import api, fields, models, _
 from odoo.exceptions import AccessError, UserError, ValidationError
@@ -77,6 +78,7 @@ class DistributorSchemeCalculator(models.AbstractModel):
 
         invoice_ids = set(invoices.ids)
         eligible_invoice_lines = defaultdict(list)
+        gross_parts = []
         for move in invoices:
             if not self._source_is_available_at_cutoff(move, cutoff, exceptions):
                 continue
@@ -85,6 +87,11 @@ class DistributorSchemeCalculator(models.AbstractModel):
             ).sorted("id")
             for line in move_lines:
                 classification = self._classify_product_line(line, exceptions)
+                if classification == "ZERO_VALUE":
+                    invoice_evidence.append(self._build_line_evidence(
+                        move, line, 0.0, "EXCLUDED_ZERO_VALUE", classification=classification
+                    ))
+                    continue
                 if classification != "QUALIFYING":
                     continue
                 if move.reversed_entry_id and move.reversed_entry_id.move_type == "out_refund":
@@ -94,7 +101,7 @@ class DistributorSchemeCalculator(models.AbstractModel):
                 quantity = self._normalize_purchase_quantity(line, scheme, exceptions)
                 if quantity is None:
                     continue
-                gross += quantity
+                gross_parts.append(quantity)
                 eligible_invoice_lines[move.id].append((line, quantity))
                 invoice_evidence.append(self._build_line_evidence(move, line, quantity, "INVOICE"))
 
@@ -145,7 +152,13 @@ class DistributorSchemeCalculator(models.AbstractModel):
                 ))
                 continue
             seen_refund_line_ids.add(refund_line.id)
-            if self._classify_product_line(refund_line, exceptions) != "QUALIFYING":
+            classification = self._classify_product_line(refund_line, exceptions)
+            if classification == "ZERO_VALUE":
+                refund_evidence.append(self._build_line_evidence(
+                    refund, refund_line, 0.0, "EXCLUDED_ZERO_VALUE", origin=origin, classification=classification
+                ))
+                continue
+            if classification != "QUALIFYING":
                 continue
             quantity = self._normalize_purchase_quantity(refund_line, scheme, exceptions)
             if quantity is None:
@@ -157,6 +170,8 @@ class DistributorSchemeCalculator(models.AbstractModel):
                 self._exception(exceptions, "REFUND_EXCEEDS_PURCHASE", "BLOCKING", _(
                     "Attributed posted credit notes exceed the qualifying quantity of their source invoice line. Review accounting records."
                 ))
+            # Keep unrounded values until after all source lines and reversals are
+            # aggregated. No line-by-line UoM rounding is applied.
             refund_quantity += quantity
             refund_evidence.append(self._build_line_evidence(refund, refund_line, quantity, "CREDIT_NOTE", origin=origin))
             if refund.invoice_date and refund.invoice_date > end:
@@ -173,14 +188,15 @@ class DistributorSchemeCalculator(models.AbstractModel):
         )
 
         precision = self._quantity_precision()
-        gross = float_round(gross, precision_digits=precision)
+        gross = fsum(gross_parts)
         refund_quantity = float_round(refund_quantity, precision_digits=precision)
-        net = float_round(gross - refund_quantity, precision_digits=precision)
-        if float_compare(net, 0.0, precision_digits=precision) < 0:
+        raw_net = gross - refund_quantity
+        net = float_round(raw_net, precision_digits=precision)
+        if float_compare(raw_net, 0.0, precision_digits=precision) < 0:
             self._exception(exceptions, "NEGATIVE_NET_QUANTITY", "BLOCKING", _(
                 "Attributed posted refunds exceed the eligible purchase quantity. Review the source documents."
             ))
-        slab = self._select_highest_slab(scheme, max(net, 0.0))
+        slab = self._select_highest_slab(scheme, max(raw_net, 0.0))
         if not scheme.slab_ids:
             self._exception(exceptions, "NO_SLAB_CONFIGURATION", "BLOCKING", _(
                 "The scheme has no purchase slabs configured; eligibility cannot be determined."
@@ -226,8 +242,8 @@ class DistributorSchemeCalculator(models.AbstractModel):
             "slab_id": slab.id or False,
             "reward_product_id": scheme.reward_product_id.id,
             "reward_quantity": slab.reward_quantity if slab else 0.0,
-            "invoice_count": len({item["move_id"] for item in invoice_evidence}),
-            "refund_count": len({item["move_id"] for item in refund_evidence}),
+            "invoice_count": len({item["move_id"] for item in invoice_evidence if item["line_classification"] == "QUALIFYING"}),
+            "refund_count": len({item["move_id"] for item in refund_evidence if item["line_classification"] == "QUALIFYING"}),
             "invoice_sources": sorted(invoice_evidence, key=self._source_sort_key),
             "refund_sources": sorted(refund_evidence, key=self._source_sort_key),
             "exceptions": exceptions,
@@ -258,12 +274,14 @@ class DistributorSchemeCalculator(models.AbstractModel):
             raise ValidationError(_("The preview dates and as-of cutoff must be valid."))
         if not start or not end or not cutoff or end < start:
             raise ValidationError(_("The preview period dates and as-of cutoff are required and valid."))
-        if start < scheme.date_start or end > scheme.date_end:
-            raise ValidationError(_("The requested preview period must be fully inside scheme validity dates."))
-        if scheme.company_id != self.env.company or scheme.company_id not in self.env.companies:
-            raise AccessError(_("Switch to a company authorized for this scheme before previewing eligibility."))
         scheme.check_access("read")
         distributor.check_access("read")
+        if scheme.company_id != self.env.company or scheme.company_id not in self.env.companies:
+            raise AccessError(_("Switch to a company authorized for this scheme before previewing eligibility."))
+        if start < scheme.date_start or end > scheme.date_end:
+            raise ValidationError(_("The requested preview period must be fully inside scheme validity dates."))
+        if cutoff > fields.Datetime.now():
+            raise ValidationError(_("The as-of cutoff cannot be in the future."))
         if distributor not in scheme.distributor_ids:
             raise ValidationError(_("The selected distributor is not eligible for this scheme."))
         return scheme, distributor
@@ -375,10 +393,12 @@ class DistributorSchemeCalculator(models.AbstractModel):
         for move in reversals:
             origin_refund = move.reversed_entry_id
             origin_invoice = origin_refund.reversed_entry_id
-            if not origin_invoice or origin_invoice.id not in eligible_invoice_lines:
+            if not origin_invoice:
                 self._exception(exceptions, "CREDIT_NOTE_REVERSAL_ORIGIN_UNRESOLVED", "BLOCKING", _(
                     "A posted customer invoice reverses a credit note, but its original purchase attribution is unresolved."
                 ))
+                continue
+            if origin_invoice.id not in eligible_invoice_lines:
                 continue
             lines = move.line_ids.filtered(
                 lambda line: line.display_type == "product" and line.product_id == scheme.qualifying_product_id
@@ -414,7 +434,7 @@ class DistributorSchemeCalculator(models.AbstractModel):
         return refund_quantity
 
     @api.model
-    def _build_line_evidence(self, move, line, qualifying_quantity, role, origin=None):
+    def _build_line_evidence(self, move, line, qualifying_quantity, role, origin=None, classification=None):
         return {
             "company_id": move.company_id.id,
             "distributor_id": move.commercial_partner_id.id,
@@ -431,6 +451,7 @@ class DistributorSchemeCalculator(models.AbstractModel):
             "source_quantity": line.quantity,
             "normalized_quantity": qualifying_quantity,
             "line_subtotal": line.price_subtotal,
+            "line_classification": classification or ("QUALIFYING" if qualifying_quantity else "ZERO_VALUE"),
             "source_write_date": fields.Datetime.to_string(line.write_date) if line.write_date else False,
             "source_role": role,
             "origin_move_id": origin.id if origin else False,
@@ -442,7 +463,9 @@ class DistributorSchemeCalculator(models.AbstractModel):
 
     @api.model
     def _quantity_precision(self):
-        return self.env["decimal.precision"].precision_get("Product Unit")
+        # Conversion remains unrounded per line. Twelve decimal places provide a
+        # stable aggregate/comparison boundary without promoting 199.999999 to 200.
+        return 12
 
     @api.model
     def _select_highest_slab(self, scheme, quantity):
