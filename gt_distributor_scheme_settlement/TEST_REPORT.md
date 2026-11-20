@@ -1,4 +1,4 @@
-# P01-P03 Verification Report
+# P01-P04 Verification Report
 
 Date: 2026-11-20
 
@@ -97,7 +97,7 @@ Final passing command (PowerShell; isolated UTF-8 PostgreSQL 18 cluster, port 55
 - Preview requires scheme operator/manager membership **and** standard accounting read access to `account.move` and `account.move.line`; this intentionally does not bypass accounting ACLs. Production role setup must grant these rights where previews are needed.
 - The source search is scoped by company, commercial partner, document type, posted state, date, and product. A same-company wrong-distributor credit note or a different-company credit note is excluded by normal source visibility and cannot be used to reduce the entitlement. No source data is returned for records outside the request scope.
 - Account data has no historical line-version store. As-of behavior uses current `create_date`/`write_date` as conservative availability guards; relevant after-cutoff changes block. This avoids fabricated historical quantities but cannot reconstruct data overwritten before the first preview.
-- A functional 1,000-line test, targeted 1,002-invoice performance profile, and real concurrent preview/source-posting probe pass on the isolated database. Broad load sweeps and import-specific vectors beyond direct unauthorized method/ID calls remain unverified. No settlement claim snapshot is persisted. Period closure/claim generation, immutable evidence, approval, fulfillment, post-approval adjustments, and financial settlement remain P04–P08 work.
+- A functional 1,000-line test, targeted 1,002-invoice performance profile, and real concurrent preview/source-posting probe pass on the isolated database. Broad load sweeps and import-specific vectors beyond direct unauthorized method/ID calls remain unverified. At P03, no settlement snapshot was persisted. Period closing, claim generation, and snapshots are implemented in P04; approval, fulfillment, post-approval adjustments, and financial settlement remain later work.
 - Odoo 20 supported-Python testing is still outstanding: this machine exposes Python 3.11.9 and 3.14.6 only. The successful run used 3.14.6, outside the declared 3.12–3.13 range. The addon is not ready to publish until the module suite passes on a supported runtime; broader load sweeps and import-specific security vectors remain additional validation.
 
 ## Acceptance checks
@@ -113,5 +113,55 @@ Final passing command (PowerShell; isolated UTF-8 PostgreSQL 18 cluster, port 55
 
 - Odoo superuser mode intentionally bypasses access controls. Future privileged services need their own explicit authorization and invariant checks.
 - Direct cross-company scheme-ID injection and concurrent posting/read snapshot behavior are covered. Broader multi-company source-access combinations and import-specific vectors remain to be tested. Tests used the discovered unsupported Python 3.14.6 runtime. A broad Odoo core test run also hit an unrelated core attachment memory assertion, so successful module runs are filtered to this addon.
-- P03 provides read-only eligibility previews only. Period closing, claim generation, immutable document snapshot capture, stale claim revalidation, manager approval, zero-priced sales orders, delivery reconciliation, and late-return adjustment workflow remain deferred to P04–P08.
+- P03 itself provides read-only eligibility previews only. P04 now adds period closing, claim generation, immutable source snapshots, and stale claim revalidation. Manager approval, zero-priced sales orders, delivery reconciliation, and late-return adjustment workflow remain deferred to P05–P08.
 - The addon is not ready to publish; supported-Python validation and broad load-sweep work remain.
+
+## P04 period closing, claims, and snapshots
+
+### Implemented
+
+- Added a manager-authorized scheme activation action because P04 period closing requires an active scheme. Active scheme configuration and slab rules are server-protected from ordinary edits. Period create/date changes are serialized by a scheme row lock/version update; inclusive period overlap is rejected and adjacent periods are accepted.
+- Added explicit period close cutoff, closed actor/time, source/claim/exception counts, distributor outcomes, reward totals grouped by product/UoM, and a deterministic close hash. Period close verifies scheme/company/period end/configuration, calculates every eligible distributor, and is all-or-nothing: a BLOCKED outcome aborts; NOT_ELIGIBLE is retained in the close summary without a positive claim.
+- Period closing locks the period, gathers and locks source accounting rows in stable ID order, recalculates before allocation, then creates draft claims, immutable source rows, audit events, and closed-period metadata in one Odoo transaction. No manual commit is used. Repeated close of a closed period returns its existing claims.
+- Added one draft claim per scheme/distributor/period with company-scoped database uniqueness constraints. Claim creation and protected fields require in-process service capabilities; direct ORM creation, entitlement edits, lifecycle forgery, copying, deletion, and source evidence modification are denied. Only draft submission and manager review-start transitions exist; neither action approves a claim.
+- Claim evidence captures scheme, period, distributor, slab, UoMs, quantities, cutoff, sorted invoice/refund evidence, and hashes. Canonical JSON uses sorted keys, normalized numeric strings, and sorted source identities with SHA-256. ORM immutability plus integrity checks detect snapshot tampering; this does not protect against database administrators.
+- Claim source line identity is unique per company across this MVP, intentionally preventing one accounting line from being consumed by two scheme claims. A later product policy may need an explicit source-sharing/revision rule if campaigns should stack.
+- Revalidation returns CURRENT, STALE, or BLOCKED. A source change is classified as entitlement changed only when the reward product or reward quantity changes; otherwise it is `source_changed_entitlement_unchanged`. Revalidation preserves the original claim snapshot; stale or blocked claims cannot be submitted or sent to review.
+- Updated native period/claim forms and lists show lifecycle, closing summaries, quantities, fingerprints, source lines, snapshots, and audit history. No approval, sales order, stock, or accounting settlement action is exposed.
+
+### Actual P04 execution evidence
+
+| Check | Result | Evidence |
+|---|---|---|
+| Python syntax / XML parsing | PASS | Python AST parsed 18 addon files; XML parser parsed 8 files after final changes. |
+| Fresh Community install, registry, security, menus and views | PASS (unsupported interpreter) | Disposable PostgreSQL 18 database `gt_scheme_p04_test`; clean install loaded 90 Odoo modules and addon registry/views/security. First clean run completed tests but exposed defects that were fixed before the final update run. |
+| P01-P03 regressions plus P04 ORM suite | PASS (unsupported interpreter) | Final Odoo result: `46 post-tests`, `0 failed`, `0 errors`; Odoo stats show 48 tests and 11,397 queries. `.test/odoo-p04-final.log`. Includes real invoice/refund ORM records, P03 calculator integration, 1,000-line preview test, company isolation, period close, draft claim evidence, source allocations, stale revalidation, and lifecycle guards. |
+| Period close atomic rollback / duplicate prevention / snapshot protection | PASS (unsupported interpreter) | Tests assert blocked calculations leave no claims, repeated close is idempotent, source/claim uniqueness rejects duplicate allocation, snapshots remain unchanged after accounting source changes, and direct evidence mutation is denied. Included in final log. |
+| Claim revalidation source-change categories | PASS (unsupported interpreter) | Tests cover unchanged source, backdated new invoice, late refund, reward changed, and source changed while reward entitlement remains unchanged. |
+| Actual concurrent P04 close/allocation transactions | NOT RUN | The final suite does not use independent concurrent cursors for P04 period close or conflicting allocation. Row locks, repeatable-read source consistency, and SQL uniqueness constraints are implemented, but their concurrent P04 behavior is not verified by this run. P03 concurrent read-preview evidence does not verify P04 closing concurrency. |
+| Broad multi-thousand-line close benchmark / query plans | NOT RUN | A real 1,000-line preview passed; no 1,000-line period-close scaling run or production query-plan sweep was performed. |
+| Odoo-supported Python 3.12/3.13 run | NOT RUN | Only Python 3.14.6 was available; Odoo 20 source declares support for Python 3.12–3.13. |
+
+Final successful command (PowerShell; disposable database and isolated local PostgreSQL cluster):
+
+```powershell
+& C:\PycharmProjects\odoo20\.venv\Scripts\python.exe C:\PycharmProjects\odoo20\odoo-20.0\odoo-bin --addons-path=C:\PycharmProjects\odoo20\odoo-20.0\odoo\addons,C:\PycharmProjects\odoo20\custom_addons --data-dir=C:\PycharmProjects\odoo20\custom_addons\gt_distributor_scheme_settlement\.test\odoo-data --db_host=127.0.0.1 --db_port=55498 --db_user=odoo_test --db_password= --database=gt_scheme_p04_test --update=gt_distributor_scheme_settlement --without-demo --test-enable --test-tags=/gt_distributor_scheme_settlement --stop-after-init --http-port=8095 --logfile=C:\PycharmProjects\odoo20\custom_addons\gt_distributor_scheme_settlement\.test\odoo-p04-final.log
+```
+
+### P04 acceptance matrix
+
+- **AC-17 closed-period calculation: PASS (concurrency NOT RUN).** Real tests cover authorization, explicit cutoff, end-date requirement, active scheme, all-distributor calculation, blocked rollback, and period snapshot. Concurrent closes remain unverified.
+- **AC-18 duplicate prevention: PASS (concurrency NOT RUN).** Database uniqueness and idempotent close are implemented and sequentially tested; concurrent worker behavior is not verified.
+- **AC-19 entitlement accuracy: PASS.** Tests compare invoice/refund/UoM/slab results with generated draft claim values and saved source contributions.
+- **AC-20 immutable snapshot: PASS (application ORM guarantee).** Snapshot/hash/source protections and tamper checks pass. Privileged database-level tampering remains outside the guarantee.
+- **AC-21 stale change detection: PASS (tested source-change cases).** Current/stale/blocked paths and late/backdated changes are tested; a broad correction/reversal matrix is not exhaustive.
+
+### P04 limitations and P05-P08 work
+
+- Periods retain the P01 default `open` state for compatibility. Explicit Draft-to-Open manager action is available; closing requires an active scheme and an ended period. The cutoff is recorded, but Odoo cannot reconstruct prior values for a source changed after cutoff; closure captures a contemporaneous transaction snapshot and the cutoff is not a historical database reconstruction.
+- P04 has not run independent-transaction closing or allocation races. Before commercial use, add true concurrent database-cursor tests for same-period close, cross-scheme allocation, and source posting during close, then fix any discovered race.
+- P05: maker-checker claim approval, self-approval prevention, approval-time mandatory revalidation, approved entitlement freeze, controlled revisions/rejections, and approval audit.
+- P06: zero-priced free-goods sales orders, actual delivery reconciliation, and late return adjustment exceptions.
+- P07: reporting and premium dashboard.
+- P08: packaging, documentation polish, supported-runtime verification, and publication readiness review.
+- This work does not make the application ready to publish.
