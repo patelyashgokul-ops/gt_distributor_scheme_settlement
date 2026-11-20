@@ -1,6 +1,193 @@
 <odoo>
-    <record id="view_distributor_scheme_claim_list" model="ir.ui.view"><field name="name">gt.distributor.scheme.claim.list</field><field name="model">gt.distributor.scheme.claim</field><field name="arch" type="xml"><list string="Settlement Claims"><field name="name"/><field name="scheme_id"/><field name="distributor_id"/><field name="period_id"/><field name="company_id" groups="base.group_multi_company"/><field name="entitlement_quantity"/><field name="state" widget="badge"/></list></field></record>
-    <record id="view_distributor_scheme_claim_form" model="ir.ui.view"><field name="name">gt.distributor.scheme.claim.form</field><field name="model">gt.distributor.scheme.claim</field><field name="arch" type="xml"><form string="Settlement Claim"><sheet><div class="oe_title"><h1><field name="name"/></h1></div><group><group><field name="scheme_id"/><field name="distributor_id"/><field name="period_id"/></group><group><field name="company_id" groups="base.group_multi_company"/><field name="entitlement_quantity"/><field name="state" widget="statusbar" statusbar_visible="draft,submitted,approved,fulfilled,cancelled" readonly="1"/></group></group><group string="Approval"><field name="approved_by_id"/><field name="approved_at"/></group><group string="Fulfillment"><field name="fulfillment_order_id"/><field name="fulfillment_picking_ids" widget="many2many_tags"/></group><notebook><page string="Source Evidence"><field name="source_ids" readonly="1"><list><field name="invoice_date"/><field name="move_id"/><field name="product_id"/><field name="quantity"/><field name="unit_price"/></list></field></page><page string="Adjustments"><field name="adjustment_ids" readonly="1"><list><field name="adjustment_date"/><field name="quantity_delta"/><field name="source_move_id"/><field name="created_by_id"/></list></field></page><page string="Notes"><field name="note"/></page></notebook><p class="text-muted">Approval, purchase calculation, and fulfillment workflows are not implemented in this release.</p></sheet><chatter/></form></field></record>
-    <record id="view_distributor_scheme_claim_search" model="ir.ui.view"><field name="name">gt.distributor.scheme.claim.search</field><field name="model">gt.distributor.scheme.claim</field><field name="arch" type="xml"><search string="Search Claims"><field name="name"/><field name="scheme_id"/><field name="distributor_id"/><filter name="draft" string="Draft" domain="[('state','=','draft')]"/><filter name="approved" string="Approved" domain="[('state','=','approved')]"/><group><filter name="group_scheme" string="Scheme" context="{'group_by':'scheme_id'}"/><filter name="group_state" string="State" context="{'group_by':'state'}"/></group></search></field></record>
-    <record id="action_distributor_scheme_claims" model="ir.actions.act_window"><field name="name">Settlement Claims</field><field name="res_model">gt.distributor.scheme.claim</field><field name="view_mode">list,form</field><field name="search_view_id" ref="view_distributor_scheme_claim_search"/></record>
+    <record id="view_distributor_scheme_claim_list" model="ir.ui.view">
+        <field name="name">gt.distributor.scheme.claim.list</field>
+        <field name="model">gt.distributor.scheme.claim</field>
+        <field name="arch" type="xml">
+            <list string="Settlement Claims" decoration-warning="source_validation_status != 'current'">
+                <field name="name"/>
+                <field name="distributor_id"/>
+                <field name="scheme_id"/>
+                <field name="period_id"/>
+                <field name="company_id" groups="base.group_multi_company"/>
+                <field name="net_quantity"/>
+                <field name="qualifying_uom_id"/>
+                <field name="reward_product_id"/>
+                <field name="reward_quantity"/>
+                <field name="state" widget="badge"/>
+                <field name="source_validation_status" widget="badge"/>
+            </list>
+        </field>
+    </record>
+    <record id="view_distributor_scheme_claim_form" model="ir.ui.view">
+        <field name="name">gt.distributor.scheme.claim.form</field>
+        <field name="model">gt.distributor.scheme.claim</field>
+        <field name="arch" type="xml">
+            <form string="Settlement Claim">
+                <header>
+                    <button name="action_submit" type="object" string="Submit Claim" class="btn-primary"
+                            groups="gt_distributor_scheme_settlement.group_scheme_operator,gt_distributor_scheme_settlement.group_scheme_manager"
+                            invisible="state != 'draft'"/>
+                    <button name="action_start_review" type="object" string="Start Review" class="btn-primary"
+                            groups="gt_distributor_scheme_settlement.group_scheme_manager" invisible="state != 'submitted'"/>
+                    <button name="action_revalidate_sources" type="object" string="Revalidate Sources"
+                            groups="gt_distributor_scheme_settlement.group_scheme_operator,gt_distributor_scheme_settlement.group_scheme_manager"
+                            invisible="state in ['approved', 'rejected', 'fulfilled', 'settled', 'cancelled']"/>
+                    <field name="state" widget="statusbar" statusbar_visible="draft,submitted,under_review,approved,rejected,fulfilled,settled" readonly="1"/>
+                </header>
+                <sheet>
+                    <div class="oe_title"><h1><field name="name"/></h1></div>
+                    <group>
+                        <group string="Claim Identity">
+                            <field name="scheme_id"/>
+                            <field name="period_id"/>
+                            <field name="distributor_id"/>
+                            <field name="company_id" groups="base.group_multi_company"/>
+                        </group>
+                        <group string="Claim Status">
+                            <field name="source_validation_status" widget="badge"/>
+                            <field name="source_change_category"/>
+                            <field name="source_validation_at"/>
+                            <field name="source_evidence_count"/>
+                        </group>
+                    </group>
+                    <notebook>
+                        <page string="Claim Summary">
+                            <group>
+                                <group string="Purchase Eligibility">
+                                    <field name="qualifying_product_id"/>
+                                    <field name="qualifying_uom_id"/>
+                                    <field name="gross_quantity"/>
+                                    <field name="refund_quantity"/>
+                                    <field name="net_quantity"/>
+                                </group>
+                                <group string="Reward Entitlement">
+                                    <field name="slab_id"/>
+                                    <field name="reward_product_id"/>
+                                    <field name="reward_uom_id"/>
+                                    <field name="reward_quantity"/>
+                                    <field name="entitlement_quantity"/>
+                                </group>
+                            </group>
+                            <group><field name="note" placeholder="Internal claim notes"/></group>
+                        </page>
+                        <page string="Eligibility Calculation">
+                            <group>
+                                <field name="calculation_cutoff"/>
+                                <field name="calculation_snapshot_at"/>
+                                <field name="originating_scheme_code"/>
+                                <field name="created_by_id"/>
+                                <field name="submitted_by_id"/>
+                                <field name="submitted_at"/>
+                                <field name="reviewed_by_id"/>
+                                <field name="reviewed_at"/>
+                            </group>
+                            <group string="Fingerprints">
+                                <field name="source_fingerprint"/>
+                                <field name="calculation_fingerprint"/>
+                                <field name="snapshot_hash"/>
+                                <field name="snapshot_version"/>
+                            </group>
+                            <field name="source_validation_result" readonly="1"/>
+                        </page>
+                        <page string="Invoice Sources">
+                            <field name="invoice_source_ids" readonly="1">
+                                <list create="0" edit="0" delete="0">
+                                    <field name="invoice_date"/>
+                                    <field name="move_id"/>
+                                    <field name="invoice_line_id"/>
+                                    <field name="product_id"/>
+                                    <field name="source_quantity"/>
+                                    <field name="product_uom_id"/>
+                                    <field name="normalized_quantity"/>
+                                    <field name="normalized_uom_id"/>
+                                    <field name="line_subtotal"/>
+                                    <field name="currency_id"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Refund Sources">
+                            <field name="refund_source_ids" readonly="1">
+                                <list create="0" edit="0" delete="0">
+                                    <field name="invoice_date"/>
+                                    <field name="move_id"/>
+                                    <field name="invoice_line_id"/>
+                                    <field name="origin_invoice_id"/>
+                                    <field name="product_id"/>
+                                    <field name="source_quantity"/>
+                                    <field name="product_uom_id"/>
+                                    <field name="quantity"/>
+                                    <field name="normalized_uom_id"/>
+                                    <field name="line_subtotal"/>
+                                    <field name="currency_id"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Snapshot Evidence">
+                            <group><field name="snapshot_json" widget="text" nolabel="1"/></group>
+                            <group string="Integrity">
+                                <field name="snapshot_hash"/>
+                                <field name="source_fingerprint"/>
+                                <field name="calculation_fingerprint"/>
+                            </group>
+                        </page>
+                        <page string="Audit History">
+                            <field name="audit_ids" readonly="1">
+                                <list create="0" edit="0" delete="0">
+                                    <field name="event_date"/>
+                                    <field name="event_type"/>
+                                    <field name="actor_id"/>
+                                    <field name="evidence"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Adjustments">
+                            <field name="adjustment_ids" readonly="1">
+                                <list create="0" edit="0" delete="0">
+                                    <field name="adjustment_date"/>
+                                    <field name="quantity_delta"/>
+                                    <field name="source_move_id"/>
+                                    <field name="created_by_id"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Future Approval and Fulfillment" groups="gt_distributor_scheme_settlement.group_scheme_manager">
+                            <group string="Approval Placeholder"><field name="approved_by_id"/><field name="approved_at"/></group>
+                            <group string="Fulfillment Placeholder"><field name="fulfillment_order_id"/><field name="fulfillment_picking_ids" widget="many2many_tags"/></group>
+                            <p class="text-muted">Approval and stock fulfillment are not implemented in P04.</p>
+                        </page>
+                    </notebook>
+                    <p class="text-muted">A draft claim contains a protected eligibility snapshot. Submission and review do not approve the entitlement or issue free goods.</p>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+    <record id="view_distributor_scheme_claim_search" model="ir.ui.view">
+        <field name="name">gt.distributor.scheme.claim.search</field>
+        <field name="model">gt.distributor.scheme.claim</field>
+        <field name="arch" type="xml">
+            <search string="Search Claims">
+                <field name="name"/>
+                <field name="scheme_id"/>
+                <field name="distributor_id"/>
+                <field name="period_id"/>
+                <filter name="draft" string="Draft" domain="[('state','=','draft')]"/>
+                <filter name="submitted" string="Submitted" domain="[('state','=','submitted')]"/>
+                <filter name="under_review" string="Under Review" domain="[('state','=','under_review')]"/>
+                <filter name="stale" string="Stale" domain="[('source_validation_status','=','stale')]"/>
+                <filter name="blocked" string="Blocked" domain="[('source_validation_status','=','blocked')]"/>
+                <group>
+                    <filter name="group_scheme" string="Scheme" context="{'group_by':'scheme_id'}"/>
+                    <filter name="group_state" string="State" context="{'group_by':'state'}"/>
+                    <filter name="group_period" string="Period" context="{'group_by':'period_id'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+    <record id="action_distributor_scheme_claims" model="ir.actions.act_window">
+        <field name="name">Settlement Claims</field>
+        <field name="res_model">gt.distributor.scheme.claim</field>
+        <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="view_distributor_scheme_claim_search"/>
+    </record>
 </odoo>

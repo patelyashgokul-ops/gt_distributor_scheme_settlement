@@ -74,6 +74,8 @@ class DistributorSchemeClaim(models.Model):
     fulfillment_order_id = fields.Many2one("sale.order", readonly=True, copy=False, check_company=True)
     fulfillment_picking_ids = fields.Many2many("stock.picking", string="Fulfillment Transfers", readonly=True, copy=False)
     source_ids = fields.One2many("gt.distributor.scheme.claim.source", "claim_id", string="Source Evidence", readonly=True)
+    invoice_source_ids = fields.One2many("gt.distributor.scheme.claim.source", "claim_id", string="Invoice Sources", domain=[("source_role", "=", "invoice")], readonly=True)
+    refund_source_ids = fields.One2many("gt.distributor.scheme.claim.source", "claim_id", string="Refund Sources", domain=[("source_role", "=", "refund")], readonly=True)
     adjustment_ids = fields.One2many("gt.distributor.scheme.claim.adjustment", "claim_id", string="Adjustments", readonly=True)
     audit_ids = fields.One2many("gt.distributor.scheme.audit", "claim_id", string="Audit History", readonly=True)
     note = fields.Text()
@@ -98,7 +100,7 @@ class DistributorSchemeClaim(models.Model):
         "review_note", "source_validation_status", "source_change_category",
         "source_validation_at", "source_validation_result", "state", "approved_by_id",
         "approved_at", "fulfillment_order_id", "fulfillment_picking_ids", "source_ids",
-        "adjustment_ids", "audit_ids",
+        "adjustment_ids", "audit_ids", "invoice_source_ids", "refund_source_ids",
     }
 
     @api.model_create_multi

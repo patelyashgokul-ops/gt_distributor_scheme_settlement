@@ -372,3 +372,10 @@ class DistributorSchemePeriod(models.Model):
             "domain": [("period_id", "=", self.id)],
             "context": {"default_period_id": self.id},
         }
+
+    def action_view_claims(self):
+        self.ensure_one()
+        self.check_access("read")
+        if self.company_id not in self.env.companies:
+            raise AccessError(_("You cannot view claims outside your allowed companies."))
+        return self._claims_action()

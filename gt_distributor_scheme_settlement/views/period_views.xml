@@ -1,0 +1,108 @@
+<odoo>
+    <record id="view_distributor_scheme_period_list" model="ir.ui.view">
+        <field name="name">gt.distributor.scheme.period.list</field>
+        <field name="model">gt.distributor.scheme.period</field>
+        <field name="arch" type="xml">
+            <list string="Scheme Periods" decoration-muted="state == 'draft'" decoration-success="state == 'closed'">
+                <field name="name"/>
+                <field name="scheme_id"/>
+                <field name="company_id" groups="base.group_multi_company"/>
+                <field name="date_start"/>
+                <field name="date_end"/>
+                <field name="state" widget="badge"/>
+                <field name="generated_claim_count"/>
+                <field name="exception_count"/>
+                <field name="closed_at" optional="hide"/>
+            </list>
+        </field>
+    </record>
+    <record id="view_distributor_scheme_period_form" model="ir.ui.view">
+        <field name="name">gt.distributor.scheme.period.form</field>
+        <field name="model">gt.distributor.scheme.period</field>
+        <field name="arch" type="xml">
+            <form string="Scheme Period">
+                <header>
+                    <button name="action_open_period" type="object" string="Open Period" class="btn-primary"
+                            groups="gt_distributor_scheme_settlement.group_scheme_manager" invisible="state != 'draft'"/>
+                    <button name="action_close_period" type="object" string="Close Period and Generate Claims" class="btn-primary"
+                            groups="gt_distributor_scheme_settlement.group_scheme_manager" invisible="state != 'open'" confirm="This calculates every eligible distributor and permanently snapshots the period. Continue?"/>
+                    <button name="action_view_claims" type="object" string="View Claims"
+                            groups="gt_distributor_scheme_settlement.group_scheme_operator,gt_distributor_scheme_settlement.group_scheme_manager,gt_distributor_scheme_settlement.group_scheme_auditor"/>
+                    <field name="state" widget="statusbar" statusbar_visible="draft,open,closed"/>
+                </header>
+                <sheet>
+                    <div class="oe_title"><h1><field name="name"/></h1></div>
+                    <group>
+                        <group string="Period Identity">
+                            <field name="scheme_id" readonly="state == 'closed'"/>
+                            <field name="company_id" groups="base.group_multi_company"/>
+                            <field name="date_start" readonly="state == 'closed'"/>
+                            <field name="date_end" readonly="state == 'closed'"/>
+                        </group>
+                        <group string="Calculation Cutoff">
+                            <field name="calculation_cutoff" readonly="state == 'closed'"/>
+                            <field name="closing_cutoff"/>
+                            <field name="closed_by_id"/>
+                            <field name="closed_at"/>
+                        </group>
+                    </group>
+                    <group string="Closing Summary" invisible="state != 'closed'">
+                        <group>
+                            <field name="eligible_distributor_count"/>
+                            <field name="generated_claim_count"/>
+                            <field name="source_count"/>
+                            <field name="exception_count"/>
+                        </group>
+                        <group>
+                            <field name="calculation_fingerprint"/>
+                            <field name="close_snapshot_hash"/>
+                        </group>
+                    </group>
+                    <notebook>
+                        <page string="Distributor Calculations" invisible="state != 'closed'">
+                            <field name="close_summary" readonly="1"/>
+                        </page>
+                        <page string="Reward Totals" invisible="state != 'closed'">
+                            <field name="reward_totals" readonly="1"/>
+                            <p class="text-muted">Totals are grouped by reward product and unit. Different products or units are not combined.</p>
+                        </page>
+                        <page string="Settlement Claims">
+                            <field name="claim_ids" readonly="1">
+                                <list>
+                                    <field name="name"/>
+                                    <field name="distributor_id"/>
+                                    <field name="net_quantity"/>
+                                    <field name="qualifying_uom_id"/>
+                                    <field name="reward_product_id"/>
+                                    <field name="reward_quantity"/>
+                                    <field name="state" widget="badge"/>
+                                    <field name="source_validation_status" widget="badge"/>
+                                </list>
+                            </field>
+                        </page>
+                    </notebook>
+                    <p class="text-muted">Closing creates draft claims and immutable calculation evidence only. It does not approve claims or create sales, stock, or accounting transactions.</p>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    <record id="view_distributor_scheme_period_search" model="ir.ui.view">
+        <field name="name">gt.distributor.scheme.period.search</field>
+        <field name="model">gt.distributor.scheme.period</field>
+        <field name="arch" type="xml">
+            <search string="Search Scheme Periods">
+                <field name="name"/>
+                <field name="scheme_id"/>
+                <filter name="open" string="Open" domain="[('state','=','open')]"/>
+                <filter name="closed" string="Closed" domain="[('state','=','closed')]"/>
+                <group><filter name="group_scheme" string="Scheme" context="{'group_by':'scheme_id'}"/><filter name="group_state" string="State" context="{'group_by':'state'}"/></group>
+            </search>
+        </field>
+    </record>
+    <record id="action_distributor_scheme_periods" model="ir.actions.act_window">
+        <field name="name">Scheme Periods</field>
+        <field name="res_model">gt.distributor.scheme.period</field>
+        <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="view_distributor_scheme_period_search"/>
+    </record>
+</odoo>
