@@ -184,8 +184,8 @@ Final successful command (PowerShell; disposable database and isolated local Pos
 
 | Check | Result | Evidence |
 |---|---|---|
-| Python syntax / XML parsing | PASS (Python 3.14.6) | `compileall` and XML parsing completed after the source guard changes; final file counts recorded below. |
-| Odoo module update, registry, ACLs, revision model, decision wizard/views and source guard | PASS (unsupported interpreter) | Disposable Odoo database `gt_scheme_p04_test`; addon update registered the coordination model, accounting extensions, revision model, transient wizard, ACLs, constraints, and native forms. `.test/odoo-p05-final-source-guard.log`. |
+| Python syntax / XML parsing | PASS (Python 3.14.6) | `compileall` and XML parsing completed after the final source guard changes: 18 addon Python files and 9 XML files. |
+| Odoo module update, registry, ACLs, revision model, decision wizard/views and source guard | PASS (unsupported interpreter) | Disposable Odoo database `gt_scheme_p04_test`; addon update registered the coordination model, accounting extensions, revision model, transient wizard, ACLs, constraints, and native forms. `.test/odoo-p05-verified-final.log`. |
 | P01-P04 regressions plus P05 ORM suite | PASS (unsupported interpreter) | Final run after the accounting create/write guards: 59 post-tests, 0 failures, 0 errors; Odoo test stats 61 tests and 16,335 queries. `.test/odoo-p05-verified-final.log`. Includes P01-P04 calculations/close/snapshots plus P05 approval, rejection, revision, stale evidence, self-approval, direct write, and real Company B user isolation cases. |
 | Manager approval and frozen decision evidence | PASS (unsupported interpreter) | Real posted invoice and claim ORM fixture. Approval stores the authenticated manager identity, matching frozen values/fingerprints, and one audit event; no sale, picking, or accounting record count changes. |
 | Self-approval and direct bypass protection | PASS (unsupported interpreter) | Tests reject claim creator, submitter, and revision preparer; direct approved-state/identity/quantity/hash writes, forged claim creation, revision writes, copy, and deletion are rejected. |
