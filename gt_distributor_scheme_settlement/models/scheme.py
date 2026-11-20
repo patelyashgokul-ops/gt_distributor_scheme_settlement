@@ -54,7 +54,41 @@ class DistributorScheme(models.Model):
     def write(self, vals):
         if "state" in vals and any(record.state != vals["state"] for record in self):
             raise ValidationError(_("Scheme lifecycle changes are reserved for a later workflow release."))
+        configuration_fields = {
+            "name", "code", "company_id", "qualifying_product_id", "reward_product_id",
+            "distributor_ids", "date_start", "date_end", "qualifying_uom_id",
+        }
+        if configuration_fields.intersection(vals) and any(record.state == "active" for record in self):
+            raise ValidationError(_("An active scheme's eligibility configuration is immutable."))
         return super().write(vals)
+
+    def action_activate(self):
+        self.ensure_one()
+        if not self.env.user.has_group("gt_distributor_scheme_settlement.group_scheme_manager"):
+            raise AccessError(_("Only a scheme manager may activate a scheme."))
+        self.check_access("write")
+        if self.company_id != self.env.company or self.company_id not in self.env.companies:
+            raise AccessError(_("Switch to the scheme company before activating it."))
+        self.env.cr.execute("SELECT id FROM gt_distributor_scheme WHERE id = %s FOR UPDATE", [self.id])
+        self.invalidate_recordset()
+        if self.state != "draft":
+            raise ValidationError(_("Only a draft scheme can be activated."))
+        if not self.distributor_ids:
+            raise ValidationError(_("Add at least one eligible distributor before activation."))
+        if not self.slab_ids:
+            raise ValidationError(_("Add at least one purchase slab before activation."))
+        if not self.qualifying_product_id.uom_id._has_common_reference(self.qualifying_uom_id):
+            raise ValidationError(_("The qualifying unit must be compatible with the product's sales unit."))
+        if not self.reward_product_id.uom_id:
+            raise ValidationError(_("The reward product must have a unit of measure."))
+        super(DistributorScheme, self).write({"state": "active"})
+        self.env["gt.distributor.scheme.audit"]._record_event({
+            "company_id": self.company_id.id,
+            "scheme_id": self.id,
+            "event_type": "scheme_activated",
+            "evidence": {"scheme_code": self.code, "new_state": "active"},
+        })
+        return True
 
     def action_open_eligibility_preview(self):
         if not any(self.env.user.has_group(group) for group in (
