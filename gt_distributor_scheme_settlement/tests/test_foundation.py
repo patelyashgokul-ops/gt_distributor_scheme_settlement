@@ -165,6 +165,86 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
         claim.with_user(self.manager).action_start_review()
         return claim
 
+    def _p06_approved_claim(self, code="P06-CLAIM", reward=5):
+        claim = self._p05_reviewable_claim(code, slabs=((1, False, reward),))
+        claim.with_user(self.independent_manager).action_approve_claim("P06 fulfillment fixture approved.")
+        return claim
+
+    def _p06_prepare_order(self, claim):
+        warehouse = self.env["stock.warehouse"].search([("company_id", "=", claim.company_id.id)], limit=1)
+        self.assertTrue(warehouse, "P06 stock integration requires a company warehouse")
+        result = claim.with_user(self.manager).action_prepare_free_goods_fulfillment(warehouse.id)
+        self.assertEqual(result["res_model"], "sale.order")
+        return claim.fulfillment_order_id, warehouse
+
+    def test_p06_approved_claim_creates_single_zero_price_order_idempotently(self):
+        claim = self._p06_approved_claim("P06-ORDER")
+        before = self.env["sale.order"].search_count([])
+        order, warehouse = self._p06_prepare_order(claim)
+        self.assertEqual(order.partner_id, claim.distributor_id)
+        self.assertEqual(order.company_id, claim.company_id)
+        self.assertEqual(order.warehouse_id, warehouse)
+        self.assertTrue(order.is_scheme_fulfillment)
+        self.assertEqual(order.state, "sale")
+        self.assertEqual(len(order.order_line.filtered(lambda line: not line.display_type)), 1)
+        line = order.order_line.filtered(lambda line: not line.display_type)
+        self.assertEqual(line.product_id, claim.approved_reward_product_id)
+        self.assertEqual(line.product_uom_id, claim.approved_reward_uom_id)
+        self.assertEqual(line.product_uom_qty, claim.approved_reward_quantity)
+        self.assertEqual(line.price_unit, 0.0)
+        self.assertEqual(order.amount_total, 0.0)
+        self.assertEqual(claim.state, "fulfillment_in_progress")
+        self.assertEqual(claim.outstanding_quantity, claim.approved_reward_quantity)
+        self.assertEqual(self.env["sale.order"].search_count([]), before + 1)
+        claim.with_user(self.manager).action_prepare_free_goods_fulfillment(warehouse.id)
+        self.assertEqual(self.env["sale.order"].search_count([("scheme_claim_id", "=", claim.id)]), 1)
+
+    def test_p06_fulfillment_requires_manager_and_protected_order_cannot_be_changed(self):
+        claim = self._p06_approved_claim("P06-GUARDS")
+        warehouse = self.env["stock.warehouse"].search([("company_id", "=", claim.company_id.id)], limit=1)
+        with self.assertRaises(AccessError):
+            claim.with_user(self.operator).action_prepare_free_goods_fulfillment(warehouse.id)
+        order, _warehouse = self._p06_prepare_order(claim)
+        line = order.order_line.filtered(lambda item: not item.display_type)
+        with self.assertRaises((AccessError, ValidationError)):
+            line.write({"product_uom_qty": claim.approved_reward_quantity + 1})
+        with self.assertRaises((AccessError, ValidationError)):
+            line.write({"price_unit": 1.0})
+        with self.assertRaises(UserError):
+            order.copy()
+
+    def test_p06_actual_completed_customer_delivery_reconciles_and_settles(self):
+        claim = self._p06_approved_claim("P06-DELIVERY", reward=5)
+        order, warehouse = self._p06_prepare_order(claim)
+        self.env["stock.quant"]._update_available_quantity(
+            claim.approved_reward_product_id, warehouse.lot_stock_id, 5
+        )
+        picking = order.picking_ids.filtered(lambda item: item.picking_type_code == "outgoing")
+        self.assertEqual(len(picking), 1)
+        picking.action_assign()
+        picking.move_ids.write({"quantity": 5, "picked": True})
+        picking.button_validate()
+        claim.invalidate_recordset()
+        self.assertEqual(claim.fulfilled_quantity, 5)
+        self.assertEqual(claim.net_fulfilled_quantity, 5)
+        self.assertEqual(claim.outstanding_quantity, 0)
+        self.assertEqual(claim.state, "fulfillment_in_progress")
+        claim.with_user(self.manager).action_reconcile_fulfillment()
+        claim.with_user(self.manager).action_finalize_settlement()
+        self.assertEqual(claim.state, "settled")
+        self.assertEqual(claim.settled_by_id, self.manager)
+        self.assertTrue(claim.settlement_evidence_hash)
+        self.assertEqual(claim._hash_snapshot(claim.settlement_evidence), claim.settlement_evidence_hash)
+        with self.assertRaises((AccessError, ValidationError)):
+            claim.write({"state": "settled"})
+
+    def test_p06_unfulfilled_claim_cannot_be_finalized(self):
+        claim = self._p06_approved_claim("P06-NO-DELIVERY")
+        self._p06_prepare_order(claim)
+        with self.assertRaises(UserError):
+            claim.with_user(self.manager).action_finalize_settlement()
+        self.assertEqual(claim.state, "fulfillment_in_progress")
+
     def test_p05_manager_approves_current_claim_and_freezes_entitlement(self):
         claim = self._p05_reviewable_claim("P05-APPROVE")
         picking_count = self.env["stock.picking"].search_count([])
