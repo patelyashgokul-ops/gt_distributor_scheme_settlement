@@ -86,9 +86,9 @@ class DistributorSchemeCalculator(models.AbstractModel):
                 qualifying_quantity -= quantity
                 refund_lines.append(self._line_evidence(refund, line, -quantity))
 
-        rounding = scheme.qualifying_uom_id.rounding
-        qualifying_quantity = float_round(qualifying_quantity, precision_rounding=rounding)
-        if float_compare(qualifying_quantity, 0.0, precision_rounding=rounding) < 0:
+        precision = self.env["decimal.precision"].precision_get("Product Unit")
+        qualifying_quantity = float_round(qualifying_quantity, precision_digits=precision)
+        if float_compare(qualifying_quantity, 0.0, precision_digits=precision) < 0:
             raise UserError(_("Posted refunds exceed eligible purchases in this period; review the source documents."))
 
         slab = self._select_highest_slab(scheme, qualifying_quantity)
@@ -118,11 +118,11 @@ class DistributorSchemeCalculator(models.AbstractModel):
 
     @api.model
     def _select_highest_slab(self, scheme, quantity):
-        rounding = scheme.qualifying_uom_id.rounding
+        precision = self.env["decimal.precision"].precision_get("Product Unit")
         for slab in scheme.slab_ids.sorted("minimum_quantity", reverse=True):
-            if float_compare(quantity, slab.minimum_quantity, precision_rounding=rounding) < 0:
+            if float_compare(quantity, slab.minimum_quantity, precision_digits=precision) < 0:
                 continue
-            if slab.maximum_quantity and float_compare(quantity, slab.maximum_quantity, precision_rounding=rounding) >= 0:
+            if slab.maximum_quantity and float_compare(quantity, slab.maximum_quantity, precision_digits=precision) >= 0:
                 continue
             return slab
         return self.env["gt.distributor.scheme.slab"]

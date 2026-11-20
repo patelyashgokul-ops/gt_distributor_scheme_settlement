@@ -1,4 +1,4 @@
-# P01 Verification Report
+# P01-P02 Verification Report
 
 Date: 2026-11-20
 
@@ -20,13 +20,31 @@ Date: 2026-11-20
 | Odoo 20 Community source discovered | PASS | `odoo/release.py` reports 20.0; Community addons tree is present. |
 | Runtime / PostgreSQL config verified | PARTIAL | Python 3.14.6 is outside Odoo 20's supported range. An isolated PostgreSQL 18 cluster and disposable database were successfully used for module tests. |
 | Required source model/API inspection | PASS | All named source models and baseline accounting, product, partner, and stock fields listed above were inspected. Future workflow APIs still need focused verification when implemented. |
-| Manifest metadata and dependency declarations | PASS | Odoo 20 manifest structure; dependencies are Community addons `sale`, `account`, `stock`, `mail`; version `20.0.1.0.0`. |
+| Manifest metadata and dependency declarations | PASS | Odoo 20 manifest structure; dependencies are Community addons `sale`, `account`, `stock`, `mail`; version `20.0.2.0.0` after P02. |
 | OPL-1 metadata and dependency licensing | PASS | OPL-1 manifest value; dependency manifests declare LGPL-3; no source copied. Publisher/distribution legal review remains outside this technical check. |
 | Python syntax compilation | PASS | All 13 addon Python files compiled with Python 3.14.6. Odoo runtime compatibility remains limited by this unsupported interpreter. |
 | XML well-formedness and manifest literal parsing | PASS | All 7 XML files parsed and manifest loaded as a Python literal; Odoo installation also validated view schemas and data references. |
 | Registry setup, fresh install, ACL/rule evaluation, and module tests | PASS (unsupported interpreter) | Fresh module installation loaded the registry and addon XML/security. All 9 addon post-install tests passed on Python 3.14.6/PostgreSQL 18 using a disposable database. Odoo 20 declares Python 3.12–3.13 support; repeat on a supported interpreter before release. |
 
-The successful filtered run used `--update=gt_distributor_scheme_settlement --test-tags=/gt_distributor_scheme_settlement` on disposable database `gt_scheme_p01_test`; Odoo reported `0 failed, 0 error(s) of 9 tests`. The full run log is `.test/odoo-targeted-all.log`. A separate broad core test run on Python 3.14.6 hit an unrelated Odoo core attachment memory assertion; the final run was filtered to this addon.
+The successful P01 filtered run used `--update=gt_distributor_scheme_settlement --test-tags=/gt_distributor_scheme_settlement` on disposable database `gt_scheme_p01_test`; Odoo reported `0 failed, 0 error(s) of 9 tests`. The full run log is `.test/odoo-targeted-all.log`. A separate broad core test run on Python 3.14.6 hit an unrelated Odoo core attachment memory assertion; the P01 final run was filtered to this addon.
+
+## P02 results
+
+| Check | Result | Evidence |
+|---|---|---|
+| Posted invoice/refund source selection | PASS (unsupported interpreter) | 11 addon tests passed on disposable database `gt_scheme_p02_test`; posted invoice quantities counted, draft invoice excluded, linked refund subtracted, and a refund linked to an invoice outside the period rejected for review. |
+| Odoo 20 UoM conversion and highest qualifying slab | PASS (unsupported interpreter) | Test converts 120 units and a 24-unit refund to a net 8 dozen, then selects the [8, 12) slab only. Odoo 20 source uses the UoM common-reference hierarchy and Product Unit decimal precision. |
+| Non-persisting entitlement service and authorization | PASS (unsupported interpreter) | Calculator returns explicit result/evidence without creating claims; role boundary test denies an unassigned user. |
+| P02 Python syntax, XML, install, and registry | PASS (unsupported interpreter) | Fresh install plus module update/test loaded the registry and XML; static compilation and XML parsing repeated after final edits. |
+| Supported Python runtime | NOT RUN | Available environment is Python 3.14.6; Odoo 20 declares Python 3.12 through 3.13. Repeat under a supported interpreter. |
+
+Final P02 command (PowerShell; isolated cluster and database only):
+
+```powershell
+& C:\PycharmProjects\odoo20\.venv\Scripts\python.exe C:\PycharmProjects\odoo20\odoo-20.0\odoo-bin --addons-path=C:\PycharmProjects\odoo20\odoo-20.0\odoo\addons,C:\PycharmProjects\odoo20\custom_addons --data-dir=C:\PycharmProjects\odoo20\custom_addons\gt_distributor_scheme_settlement\.test\odoo-data --db_host=127.0.0.1 --db_port=55498 --db_user=odoo_test --db_password=odoo_test --database=gt_scheme_p02_test --update=gt_distributor_scheme_settlement --without-demo=all --test-enable --test-tags=/gt_distributor_scheme_settlement --stop-after-init --http-port=8095 --logfile=C:\PycharmProjects\odoo20\custom_addons\gt_distributor_scheme_settlement\.test\odoo-p02-rerun.log
+```
+
+Odoo reported `0 failed, 0 error(s) of 11 tests` in `.test/odoo-p02-rerun.log`. The database and filestore are under `.test`; the temporary PostgreSQL cluster was stopped after verification.
 
 ## Acceptance checks
 
