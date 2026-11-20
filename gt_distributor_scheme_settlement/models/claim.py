@@ -581,7 +581,8 @@ class DistributorSchemeClaim(models.Model):
     )
     def _check_approval_evidence(self):
         for claim in self:
-            if claim.state == "approved":
+            approval_states = {"approved", "fulfillment_in_progress", "fulfilled", "settled", "adjustment_required"}
+            if claim.state in approval_states:
                 if not all((claim.approved_by_id, claim.approved_at, claim.approved_reward_quantity > 0,
                             claim.approved_qualifying_product_id, claim.approved_qualifying_uom_id,
                             claim.approved_reward_product_id, claim.approved_reward_uom_id,
@@ -612,7 +613,7 @@ class DistributorSchemeClaim(models.Model):
                         or claim.approved_reward_uom_id != source.reward_uom_id):
                     raise ValidationError(_("Frozen approved products, units, and slab must match the approved calculation."))
             elif claim.approved_by_id or claim.approved_at or claim.approval_evidence_hash:
-                raise ValidationError(_("Approval metadata is valid only for an approved claim."))
+                raise ValidationError(_("Approval metadata is valid only for an approved or post-approval claim."))
             if claim.state == "rejected":
                 if not claim.rejected_by_id or not claim.rejected_at or not claim.rejection_reason:
                     raise ValidationError(_("A rejected claim must preserve its reviewer, date, and reason."))

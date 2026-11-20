@@ -166,6 +166,7 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
         return claim
 
     def _p06_approved_claim(self, code="P06-CLAIM", reward=5):
+        self.reward_a.is_storable = True
         claim = self._p05_reviewable_claim(code, slabs=((1, False, reward),))
         claim.with_user(self.independent_manager).action_approve_claim("P06 fulfillment fixture approved.")
         return claim
