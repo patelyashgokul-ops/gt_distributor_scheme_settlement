@@ -1,6 +1,6 @@
-import csv
+﻿import csv
 import io
-import json
+from datetime import timedelta
 
 from odoo import api, fields, models, _, SUPERUSER_ID
 from odoo.exceptions import AccessError, UserError, ValidationError
@@ -13,6 +13,7 @@ REPORT_ROLES = (
 )
 APPROVED_STATES = ("approved", "fulfillment_in_progress", "fulfilled", "settled", "adjustment_required")
 REPORT_LIMIT = 5000
+REPORT_TOKEN = object()
 
 
 class DistributorSchemeDashboard(models.TransientModel):
@@ -32,7 +33,6 @@ class DistributorSchemeDashboard(models.TransientModel):
     adjustment_count = fields.Integer(compute="_compute_metrics")
     late_refund_count = fields.Integer(compute="_compute_metrics")
     outstanding_delivery_count = fields.Integer(compute="_compute_metrics")
-    _compute_trigger = fields.Char(compute="_compute_metrics")
 
     @api.model
     def _validate_scope(self, company_id):
@@ -58,7 +58,7 @@ class DistributorSchemeDashboard(models.TransientModel):
         if date_from:
             domain.append(("create_date", ">=", fields.Datetime.to_datetime(date_from)))
         if date_to:
-            domain.append(("create_date", "<", fields.Datetime.to_datetime(date_to) + __import__("datetime").timedelta(days=1)))
+            domain.append(("create_date", "<", fields.Datetime.to_datetime(date_to) + timedelta(days=1)))
         return domain
 
     @api.depends("company_id", "scheme_id", "distributor_id", "claim_created_from", "claim_created_to")
@@ -67,7 +67,6 @@ class DistributorSchemeDashboard(models.TransientModel):
             counts = dashboard._get_metrics()
             for name, value in counts.items():
                 dashboard[name] = value
-            dashboard._compute_trigger = "ok"
 
     def _get_metrics(self):
         self.ensure_one()
@@ -202,7 +201,7 @@ class DistributorSchemeReportWizard(models.TransientModel):
             for adj in adjustments:
                 claim = adj.claim_id
                 rows.append({
-                    "report_type": "adjustment", "company_id": adj.company_id.id, "claim_id": claim.id,
+                    "report_type": "adjustment", "company_id": adj.company_id.id, "company_name": adj.company_id.display_name, "claim_id": claim.id,
                     "adjustment_id": adj.id, "scheme_id": claim.scheme_id.id, "period_id": claim.period_id.id,
                     "distributor_id": claim.distributor_id.id, "scheme_name": claim.scheme_id.name,
                     "distributor_name": claim.distributor_id.display_name, "claim_reference": claim.name,
@@ -225,7 +224,7 @@ class DistributorSchemeReportWizard(models.TransientModel):
             uom = claim.approved_reward_uom_id if approved else claim.reward_uom_id
             key = (claim.company_id.id, claim.scheme_id.id, product.id, uom.id)
             row = grouped.setdefault(key, {
-                "report_type": "scheme", "company_id": claim.company_id.id, "scheme_id": claim.scheme_id.id,
+                "report_type": "scheme", "company_id": claim.company_id.id, "company_name": claim.company_id.display_name, "scheme_id": claim.scheme_id.id,
                 "scheme_name": claim.scheme_id.name, "reward_product_id": product.id,
                 "reward_product_name": product.display_name, "reward_uom_id": uom.id,
                 "reward_uom_name": uom.display_name, "eligible_distributor_count": 0,
@@ -251,11 +250,11 @@ class DistributorSchemeReportWizard(models.TransientModel):
     def action_generate(self):
         self.ensure_one()
         rows = self._build_values()
-        self.line_ids.unlink()
+        self.line_ids.with_context(_gt_report_line_cleanup=REPORT_TOKEN).unlink()
         Line = self.env["gt.distributor.scheme.report.line"]
         for offset in range(0, len(rows), 500):
-            Line.create([dict(row, wizard_id=self.id) for row in rows[offset:offset + 500]])
-        self.with_context(_gt_report_write=True).write({"generated_at": fields.Datetime.now(), "row_count": len(rows)})
+            Line.with_context(_gt_report_line_create=REPORT_TOKEN).create([dict(row, wizard_id=self.id) for row in rows[offset:offset + 500]])
+        self.with_context(_gt_report_write=REPORT_TOKEN).write({"generated_at": fields.Datetime.now(), "row_count": len(rows)})
         return {"type": "ir.actions.act_window", "res_model": self._name, "res_id": self.id,
                 "view_mode": "form", "target": "new"}
 
@@ -270,7 +269,7 @@ class DistributorSchemeReportWizard(models.TransientModel):
         return {"type": "ir.actions.act_url", "url": f"/gt_scheme_settlement/report/{self.id}/{file_type}", "target": "self"}
 
     def write(self, vals):
-        if not self.env.context.get("_gt_report_write") and set(vals) - {"report_type", "company_id", "scheme_id", "distributor_id", "date_from", "date_to"}:
+        if self.env.context.get("_gt_report_write") is not REPORT_TOKEN and set(vals) - {"report_type", "company_id", "scheme_id", "distributor_id", "date_from", "date_to"}:
             raise AccessError(_("Report output fields are service managed."))
         return super().write(vals)
 
@@ -325,14 +324,16 @@ class DistributorSchemeReportLine(models.TransientModel):
 
     @api.model_create_multi
     def create(self, vals_list):
-        raise AccessError(_("Report rows can only be created by the authorized report service."))
+        if self.env.context.get("_gt_report_line_create") is not REPORT_TOKEN:
+            raise AccessError(_("Report rows can only be created by the authorized report service."))
+        return super().create(vals_list)
 
     def write(self, vals):
         raise AccessError(_("Generated report rows are read only."))
 
     def unlink(self):
         # Transient rows are removed when their wizard is regenerated or vacuumed.
-        if self.env.context.get("_gt_report_line_cleanup"):
+        if self.env.context.get("_gt_report_line_cleanup") is REPORT_TOKEN:
             return super().unlink()
         raise AccessError(_("Generated report rows cannot be deleted directly."))
 
@@ -414,3 +415,4 @@ def _export_columns(self):
 DistributorSchemeReportWizard._export_columns = _export_columns
 DistributorSchemeReportWizard._render_csv = _report_csv
 DistributorSchemeReportWizard._render_xlsx = _report_xlsx
+
