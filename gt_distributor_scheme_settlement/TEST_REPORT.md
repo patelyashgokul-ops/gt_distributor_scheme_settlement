@@ -1,4 +1,4 @@
-# P01-P05 Verification Report
+﻿# P01-P05 Verification Report
 
 Date: 2026-11-20
 
@@ -6,7 +6,7 @@ Date: 2026-11-20
 
 - Odoo source: `C:\PycharmProjects\odoo20\odoo-20.0`, release source reports 20.0.0 final.
 - Community addons: `C:\PycharmProjects\odoo20\odoo-20.0\addons`.
-- Project virtual environment: `C:\PycharmProjects\odoo20\.venv`, Python 3.14.6. System Python 3.11.9 is also installed; neither is in Odoo 20's supported 3.12–3.13 range. The project environment has `psycopg2` and `lxml`; Odoo is loaded from source.
+- Project virtual environment: `C:\PycharmProjects\odoo20\.venv`, Python 3.14.6. System Python 3.11.9 is also installed; neither is in Odoo 20's supported 3.12â€“3.13 range. The project environment has `psycopg2` and `lxml`; Odoo is loaded from source.
 - Odoo 20 source declares Python 3.12 minimum, Python 3.14 maximum exclusive, and PostgreSQL 16 minimum. Therefore the discovered Python 3.14.6 runtime is outside the supported range.
 - PostgreSQL 18 Windows service is running. No credentials or database contents were inspected. No existing database was used.
 - An isolated PostgreSQL 18 cluster initialized successfully under `.test/pgdata`. `pg_ctl start` failed with Windows sandbox restricted-token errors, but launching `postgres.exe` directly in the foreground worked on port 55498. Tests used only a disposable database and `.test` filestore; both were removed after verification. No existing service database was used.
@@ -24,7 +24,7 @@ Date: 2026-11-20
 | OPL-1 metadata and dependency licensing | PASS | OPL-1 manifest value; dependency manifests declare LGPL-3; no source copied. Publisher/distribution legal review remains outside this technical check. |
 | Python syntax compilation | PASS | All 13 addon Python files compiled with Python 3.14.6. Odoo runtime compatibility remains limited by this unsupported interpreter. |
 | XML well-formedness and manifest literal parsing | PASS | All 7 XML files parsed and manifest loaded as a Python literal; Odoo installation also validated view schemas and data references. |
-| Registry setup, fresh install, ACL/rule evaluation, and module tests | PASS (unsupported interpreter) | Fresh module installation loaded the registry and addon XML/security. All 9 addon post-install tests passed on Python 3.14.6/PostgreSQL 18 using a disposable database. Odoo 20 declares Python 3.12–3.13 support; repeat on a supported interpreter before release. |
+| Registry setup, fresh install, ACL/rule evaluation, and module tests | PASS (unsupported interpreter) | Fresh module installation loaded the registry and addon XML/security. All 9 addon post-install tests passed on Python 3.14.6/PostgreSQL 18 using a disposable database. Odoo 20 declares Python 3.12â€“3.13 support; repeat on a supported interpreter before release. |
 
 The successful P01 filtered run used `--update=gt_distributor_scheme_settlement --test-tags=/gt_distributor_scheme_settlement` on disposable database `gt_scheme_p01_test`; Odoo reported `0 failed, 0 error(s) of 9 tests`. The full run log is `.test/odoo-targeted-all.log`. A separate broad core test run on Python 3.14.6 hit an unrelated Odoo core attachment memory assertion; the P01 final run was filtered to this addon.
 
@@ -72,7 +72,7 @@ Odoo reported `0 failed, 0 error(s) of 11 tests` in `.test/odoo-p02-rerun.log`. 
 | 1,000-line accounting volume check | PASS (Python 3.14.6 unsupported) | Real posted invoice containing 1,000 qualifying product lines was previewed; all lines were counted once, with correct aggregate quantity and one source invoice. Included in the final suite. This is a functional volume check, not a broad load benchmark. |
 | Explicit cross-company scheme-ID injection | PASS (Python 3.14.6 unsupported) | A company-A manager directly called the calculator with a company-B scheme ID and was denied by server-side access checks. Included in the final suite. |
 | Python syntax / XML / manifest | PASS | 15 Python files parsed, 8 XML files parsed, manifest literal loaded using Python 3.14.6 after final source changes. |
-| P03 production Python support | NOT RUN | Only Python 3.14.6 was available; Odoo 20 source declares Python 3.12–3.13. |
+| P03 production Python support | NOT RUN | Only Python 3.14.6 was available; Odoo 20 source declares Python 3.12â€“3.13. |
 | Targeted source-scoping/performance profile | PASS (Python 3.14.6 unsupported) | Disposable Odoo DB with 100 distributors, 1,002 posted customer invoices, and 10 posted credit notes. The target preview included 12 invoices / 10 refunds, returned 22 source rows, calculated 39 net units in 0.1744s and 30 SQL queries. This is a measured synthetic sample, not a broad load sweep. `.test/odoo-p03-performance.log`. |
 | Concurrent preview with source posting | PASS (Python 3.14.6 unsupported) | Two independent Odoo/PostgreSQL transactions: reader established its Repeatable Read snapshot; a writer posted a new relevant customer invoice and committed; reader returned the original 10-unit result, while a fresh preview returned 30 units with a changed fingerprint. `.test/odoo-p03-concurrency.log`; probe code `.test/concurrency_probe.py`. |
 | Broad load sweep / query scaling | NOT RUN | A single synthetic 100-distributor / 1,002-invoice dataset was measured. Larger dataset sweeps and production-like query plans were not run. |
@@ -98,22 +98,22 @@ Final passing command (PowerShell; isolated UTF-8 PostgreSQL 18 cluster, port 55
 - The source search is scoped by company, commercial partner, document type, posted state, date, and product. A same-company wrong-distributor credit note or a different-company credit note is excluded by normal source visibility and cannot be used to reduce the entitlement. No source data is returned for records outside the request scope.
 - Account data has no historical line-version store. As-of behavior uses current `create_date`/`write_date` as conservative availability guards; relevant after-cutoff changes block. This avoids fabricated historical quantities but cannot reconstruct data overwritten before the first preview.
 - A functional 1,000-line test, targeted 1,002-invoice performance profile, and real concurrent preview/source-posting probe pass on the isolated database. Broad load sweeps and import-specific vectors beyond direct unauthorized method/ID calls remain unverified. At P03, no settlement snapshot was persisted. Period closing, claim generation, and snapshots are implemented in P04; approval, fulfillment, post-approval adjustments, and financial settlement remain later work.
-- Odoo 20 supported-Python testing is still outstanding: this machine exposes Python 3.11.9 and 3.14.6 only. The successful run used 3.14.6, outside the declared 3.12–3.13 range. The addon is not ready to publish until the module suite passes on a supported runtime; broader load sweeps and import-specific security vectors remain additional validation.
+- Odoo 20 supported-Python testing is still outstanding: this machine exposes Python 3.11.9 and 3.14.6 only. The successful run used 3.14.6, outside the declared 3.12â€“3.13 range. The addon is not ready to publish until the module suite passes on a supported runtime; broader load sweeps and import-specific security vectors remain additional validation.
 
 ## Acceptance checks
 
-- **AC-01 fresh install and registry:** PASS (Python 3.14.6 unsupported) — module installed into a fresh disposable Odoo 20 database; registry loaded.
-- **AC-02 required fields and validations:** PASS (Python 3.14.6 unsupported) — required fields, invalid dates and slab quantities, and unimplemented-state guards covered by addon tests.
-- **AC-03 company isolation and authorization:** PASS (Python 3.14.6 unsupported) — ACLs, Odoo 20 company-scoped `ir.access` domains, and cross-company checks covered by addon tests.
-- **AC-04 immutable audit/evidence:** PASS (Python 3.14.6 unsupported) — audit modification restrictions covered by tests; source and adjustment evidence are append-only at ORM level.
-- **AC-05 native views and menu references:** PASS (Python 3.14.6 unsupported) — Odoo view schemas and menu/action references loaded successfully; test verifies key external IDs.
+- **AC-01 fresh install and registry:** PASS (Python 3.14.6 unsupported) â€” module installed into a fresh disposable Odoo 20 database; registry loaded.
+- **AC-02 required fields and validations:** PASS (Python 3.14.6 unsupported) â€” required fields, invalid dates and slab quantities, and unimplemented-state guards covered by addon tests.
+- **AC-03 company isolation and authorization:** PASS (Python 3.14.6 unsupported) â€” ACLs, Odoo 20 company-scoped `ir.access` domains, and cross-company checks covered by addon tests.
+- **AC-04 immutable audit/evidence:** PASS (Python 3.14.6 unsupported) â€” audit modification restrictions covered by tests; source and adjustment evidence are append-only at ORM level.
+- **AC-05 native views and menu references:** PASS (Python 3.14.6 unsupported) â€” Odoo view schemas and menu/action references loaded successfully; test verifies key external IDs.
 - **AC-06 no unimplemented workflow claims:** PASS - no calculation action is exposed in the UI; the P02/P03 calculator is a permission-checked, non-persisting service and the P03 preview wizard is read-only. No claim-close, approval, fulfillment, or settlement operation is exposed; claim lifecycle and metadata writes remain server-blocked.
 
 ## Security limitations and deferred work
 
 - Odoo superuser mode intentionally bypasses access controls. Future privileged services need their own explicit authorization and invariant checks.
 - Direct cross-company scheme-ID injection and concurrent posting/read snapshot behavior are covered. Broader multi-company source-access combinations and import-specific vectors remain to be tested. Tests used the discovered unsupported Python 3.14.6 runtime. A broad Odoo core test run also hit an unrelated core attachment memory assertion, so successful module runs are filtered to this addon.
-- P03 itself provides read-only eligibility previews only. P04 now adds period closing, claim generation, immutable source snapshots, and stale claim revalidation. Manager approval, zero-priced sales orders, delivery reconciliation, and late-return adjustment workflow remain deferred to P05–P08.
+- P03 itself provides read-only eligibility previews only. P04 now adds period closing, claim generation, immutable source snapshots, and stale claim revalidation. Manager approval, zero-priced sales orders, delivery reconciliation, and late-return adjustment workflow remain deferred to P05â€“P08.
 - The addon is not ready to publish; supported-Python validation and broad load-sweep work remain.
 
 ## P04 period closing, claims, and snapshots
@@ -140,7 +140,7 @@ Final passing command (PowerShell; isolated UTF-8 PostgreSQL 18 cluster, port 55
 | Claim revalidation source-change categories | PASS (unsupported interpreter) | Tests cover unchanged source, backdated new invoice, late refund, reward changed, and source changed while reward entitlement remains unchanged. |
 | Actual concurrent P04 close/allocation transactions | PASS (unsupported interpreter) | `.test/p04_concurrency_probe.py` ran with independent Odoo registry cursors/PostgreSQL transactions. Two requests closing the same period yielded one closed period, one claim, and one safe retry error. Two different schemes competing for the same qualifying invoice line yielded one closed period, one open/rolled-back period, and one allocated line/claim; the losing close returned a user-facing conflict error. Probe stdout/results are retained in `.test/p04-concurrency-results.txt`. |
 | Broad multi-thousand-line close benchmark / query plans | NOT RUN | A real 1,000-line preview passed; no 1,000-line period-close scaling run or production query-plan sweep was performed. |
-| Odoo-supported Python 3.12/3.13 run | NOT RUN | Only Python 3.14.6 was available; Odoo 20 source declares support for Python 3.12–3.13. |
+| Odoo-supported Python 3.12/3.13 run | NOT RUN | Only Python 3.14.6 was available; Odoo 20 source declares support for Python 3.12â€“3.13. |
 
 Final successful command (PowerShell; disposable database and isolated local PostgreSQL cluster):
 
@@ -196,7 +196,7 @@ Final successful command (PowerShell; disposable database and isolated local Pos
 | Concurrent revision requests | PASS (unsupported interpreter) | `.test/p05_revision_race_existing_probe.py` asserted two independent registry cursors against the same stale claim. Exactly one proposed revision committed; the second received a safe conflict; the logical claim retained one active revision. `.test/odoo-p05-revision-race-verified.log`. |
 | Accounting source changed during approval commit | PASS for supported ORM posting | `.test/p05_source_race_probe.py` held a posted backdated invoice transaction after it acquired the company/distributor guard, then started approval on a separate cursor. PostgreSQL showed approval waiting on the guard; invoice posting committed; approval aborted safely, claim remained Under Review, and approval audit count stayed zero. Raw SQL/external database edits remain outside ORM hook coverage. `.test/odoo-p05-source-race-verified.log`. |
 | Concurrent manager approvals and approve/reject | PASS (unsupported interpreter) | Reran `.test/p05_concurrency_probe.py` after all accounting source guard changes. Two simultaneous approvals produced one decision/audit; concurrent approve-vs-reject produced exactly one mutually exclusive decision. `.test/odoo-p05-decision-races-verified.log`. |
-| Odoo-supported Python 3.12/3.13 | NOT RUN | Only Python 3.11 and 3.14 are installed; the Odoo checkout declares Python 3.12–3.13 support. |
+| Odoo-supported Python 3.12/3.13 | NOT RUN | Only Python 3.11 and 3.14 are installed; the Odoo checkout declares Python 3.12â€“3.13 support. |
 
 Final addon test command (PowerShell; disposable PostgreSQL 18 cluster/database):
 
@@ -244,8 +244,8 @@ Environment: Odoo 20.0 source checkout, PostgreSQL 18 disposable cluster on `127
 | 2-step and 3-step warehouse routes | PASS | Standard pick, pack, and ship operations were validated; internal quantities remained excluded, final customer deliveries counted. `.test/odoo-p06-two-step.log`, `.test/odoo-p06-three-step.log`; included in final suite. |
 | Serial tracked reward | PASS | Standard reservation created one line per serial lot; validated delivery totals match approved quantity. `.test/odoo-p06-serial.log`; included in final suite. |
 | Cross-company warehouse injection | PASS | Company A claim rejects Company B warehouse and creates no fulfillment order. `.test/odoo-p06-multicompany.log`; included in final suite. |
-| Concurrent order creation and settlement | PASS | Independent Odoo registry cursors/PostgreSQL transactions raced duplicate fulfillment preparation and finalization. Exactly one linked order and one settlement event/hash committed; the competing operation safely conflicted. `.test/p06_concurrency_probe.py`, `.test/p06-concurrency-results.txt`. |
-| Concurrent distinct stock-move completions | NOT RUN | The P06 independent-cursor probe covers order creation and settlement races, not two separate delivery moves racing against one entitlement cap. |
+| Concurrent order creation, distinct stock delivery, and settlement | PASS | Independent Odoo registry cursors/PostgreSQL transactions raced duplicate fulfillment preparation, two distinct pickings against the cap, and finalization. One order/audit, one delivery at the entitlement cap, and one settlement event/hash committed; competing operations safely conflicted. `.test/p06_concurrency_probe.py`, `.test/p06-concurrency-results.txt`. |
+| Concurrent distinct stock-move completions | PASS | Two separate outgoing pickings attempted 2 units each against a 2-unit cap in independent PostgreSQL transactions; exactly one completed, net fulfillment stayed 2.0, and the other safely conflicted. `.test/p06-concurrency-results.txt`. |
 | Python 3.12/3.13 runtime | NOT RUN | Only Python 3.14.6 was available; do not treat current test passes as supported-runtime verification. |
 | Tax edge configurations and 1,000-movement benchmark | NOT RUN | Zero-total tax configuration is checked in code; jurisdiction-specific/fixed-tax matrix and P06 stock/source scale benchmark remain. |
 
@@ -258,7 +258,7 @@ Final full suite command:
 ### P06 acceptance matrix
 
 - **AC-25 approved order linkage: PASS (tested flow).** One authorized order is created, confirmed, zero-priced, and tied to the frozen reward/customer/company/warehouse; repeated call returns the same order. Full tax-jurisdiction matrix is not tested.
-- **AC-26 duplicate prevention: PASS for concurrent fulfillment order creation and settlement.** Independent PostgreSQL transactions produced one order/audit and one settlement decision/evidence. A race between two different stock-move completions was not separately exercised.
+- **AC-26 duplicate prevention: PASS for concurrent fulfillment order creation and settlement.** Independent PostgreSQL transactions produced one order/audit and one settlement decision/evidence. The independent-cursor probe also raced two distinct delivery pickings against the same entitlement cap; one completed and the other conflicted safely.
 - **AC-27 actual delivered quantity: PASS for tested one-step, two-step, three-step, serial-tracked delivery, and linked return.** Internal transfers do not count; completed customer-facing moves and linked returns reconcile correctly.
 - **AC-28 partial/backorder: PASS (tested).** A real partial picking/backorder leaves outstanding quantity, the backorder completes against the same entitlement, and only then settlement succeeds.
 - **AC-29 late refund: PASS for pre-fulfillment and post-settlement cases.** Refunds block unstarted fulfillment or open signed exposure after settlement while preserving original approved and completed-delivery evidence.
@@ -269,7 +269,7 @@ Final full suite command:
 | Invariant | Result | Evidence/limit |
 |---|---|---|
 | No duplicate entitlement/order | PASS | Unique claim order link/idempotent retry plus independent-cursor fulfillment and settlement races. |
-| No delivery above approved amount | PASS tested; concurrent distinct move race NOT RUN | Standard picking validation above cap is blocked; move completion locks claim and checks remaining quantity. |
+| No delivery above approved amount | PASS, including concurrent distinct move race | Standard picking validation above cap is blocked; move completion locks claim and checks remaining quantity. |
 | No settlement without actual delivery | PASS tested | Confirmed order with zero delivery cannot finalize. |
 | No unauthorized approval / self-approval | PASS regression | P05 suite checks manager and separation-of-duties paths. |
 | No silent approved entitlement change | PASS tested | Source change preserves approval snapshot and quantity. |
@@ -288,5 +288,6 @@ Final full suite command:
 - Managers must explicitly select a warehouse if their company has more than one. Safe replacement fulfillment after cancellation is intentionally unsupported; unique order history prevents reissue and leaves the claim for controlled correction.
 - A zero sale price does not make a tax rule universally compliant. Nonzero payable totals block, but legal tax treatment remains customer/jurisdiction configuration.
 - The scheduled scan is bounded to 100 claims per company per run and chooses an active manager with accounting read access. Multi-worker queueing, large company backlog paging, and cron performance measurement remain.
-- Separate concurrent stock-move cap race, full return/UoM/lot edge matrix, source-scan scale, broad import/RPC/read-group fuzzing, and supported Python 3.12/3.13 runs remain. The scheduled monitor was installed but not benchmarked with production-volume claims.
+- Full return/UoM/lot edge matrix, source-scan scale, broad import/RPC/read-group fuzzing, and supported Python 3.12/3.13 runs remain. The scheduled monitor was installed but not benchmarked with production-volume claims.
 - P07: secure reports/exports, dashboards, disclosure/performance hardening, complete regression. P08: upgrade verification, documentation, package and final release checks. Product is not READY TO PUBLISH.
+

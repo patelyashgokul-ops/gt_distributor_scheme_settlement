@@ -1,4 +1,4 @@
-# Distributor Scheme Settlement
+﻿# Distributor Scheme Settlement
 
 Odoo 20 Community addon by Golok Technology. Support: patelyash.gokul@gmail.com.
 
@@ -8,13 +8,13 @@ P01 provides the scheme, slab, period, claim, source, adjustment, audit, and com
 
 Copy this directory into an Odoo 20 Community addons path, update the Apps list, and install **Distributor Scheme Settlement**. Dependencies are `sale_stock`, `account`, and `mail`; the inspected Odoo 20 Community `sale_stock` addon depends on Community `sale`, `stock`, and `stock_account`. The module does not modify Odoo core or vendor addons.
 
-The inspected Odoo 20 checkout declares Python 3.12–3.13 and PostgreSQL 16 minimum. Use a supported Python runtime and a disposable PostgreSQL database for automated tests. Run:
+The inspected Odoo 20 checkout declares Python 3.12â€“3.13 and PostgreSQL 16 minimum. Use a supported Python runtime and a disposable PostgreSQL database for automated tests. Run:
 
 ```powershell
 python odoo-bin --addons-path="<odoo-addons>,<custom-addons>" --data-dir="<disposable-data-dir>" --db_host=127.0.0.1 --db_port=<disposable-port> --db_user=<test-user> --db_password=<test-password> --database=gt_scheme_p03_test --init=gt_distributor_scheme_settlement --test-tags=/gt_distributor_scheme_settlement --stop-after-init --without-demo
 ```
 
-Do not point this command at production or shared databases. P01–P05 test evidence and environment limitations are in `TEST_REPORT.md`.
+Do not point this command at production or shared databases. P01â€“P05 test evidence and environment limitations are in `TEST_REPORT.md`.
 
 ## Security roles
 
@@ -41,14 +41,16 @@ P05 source revalidation and approval coordinate with supported ORM posting/editi
 3. **Evidence immutability and adjustments:** P04 protects claim and source snapshots through ORM guards and hashes; database administrators remain outside this application-level guarantee. Corrections append adjustment records; they never rewrite or erase source evidence. Late returns after period close need the P06 adjustment workflow.
 4. **Stale claim and approval controls:** P04 compares current source state to its snapshot. P05 blocks stale approval, enforces manager authorization and separation of duties, freezes the approved entitlement, and stores controlled revisions without replacing the original snapshot.
 5. **Free-goods fulfillment:** completed stock moves to a customer location count as outbound delivery; completed returns must link to those original moves. Internal transfers, drafts, reservations, and order quantities do not count. Standard routes/backorders remain authoritative. Partial quantities stay outstanding. Settlement requires actual net customer-facing delivery equal to the approved amount, with no material open adjustment.
-6. **Failure and concurrency:** order creation uses a unique claim relationship and claim row lock; stock completion locks claim/source scope and checks the remaining entitlement at the standard move completion boundary. Adjustment evidence is append-only; review acknowledgement is not evidence of physical or financial recovery. Concurrent stock/warehouse race tests and multi-step-route coverage remain outstanding.
+6. **Failure and concurrency:** order creation uses a unique claim relationship and claim row lock; stock completion locks claim/source scope and checks the remaining entitlement at the standard move completion boundary. Adjustment evidence is append-only; review acknowledgement is not evidence of physical or financial recovery. Independent PostgreSQL transactions tested duplicate order creation, two distinct stock deliveries against the entitlement cap, and concurrent settlement; competing operations safely conflicted. Standard two-step and three-step warehouse routes were also exercised.
 
 Odoo superuser/database administrator operations and direct SQL are outside addon-level tamper resistance. Unsupported tax setups, post-approval quantity changes, and fulfillment replacement after order cancellation are blocked for manual review rather than automatically corrected.
 
-## Remaining work (P07–P08)
+## Remaining work (P07â€“P08)
 
 P07: reporting, secure exports/aggregations, security/usability and performance review. P08: upgrade/release verification, documentation, final package and publication checks. P06 does not make the application release-ready.
 
 ## License
 
 The manifest declares `OPL-1`. This addon contains no copied Odoo source and depends only on the inspected Community addons, whose manifests declare LGPL-3. Odoo's [license terms](https://www.odoo.com/documentation/17.0/legal/licenses.html) describe modules using Odoo as a library and allow their distribution under a compatible license; its [manifest documentation](https://www.odoo.com/documentation/master/developer/reference/backend/module.html) recognizes `OPL-1`. The Community LGPL dependencies do not prevent declaring this addon OPL-1. Confirm publisher ownership and final distribution terms before release.
+
+
