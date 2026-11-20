@@ -11,8 +11,7 @@
     "data": [
         "data/sequence.xml",
         "security/groups.xml",
-        "security/ir.model.access.csv",
-        "security/rules.xml",
+        "security/ir.access.csv",
         "views/scheme_views.xml",
         "views/slab_views.xml",
         "views/period_views.xml",
