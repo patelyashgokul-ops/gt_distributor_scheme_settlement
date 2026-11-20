@@ -73,8 +73,9 @@ Odoo reported `0 failed, 0 error(s) of 11 tests` in `.test/odoo-p02-rerun.log`. 
 | Explicit cross-company scheme-ID injection | PASS (Python 3.14.6 unsupported) | A company-A manager directly called the calculator with a company-B scheme ID and was denied by server-side access checks. Included in the final suite. |
 | Python syntax / XML / manifest | PASS | 15 Python files parsed, 8 XML files parsed, manifest literal loaded using Python 3.14.6 after final source changes. |
 | P03 production Python support | NOT RUN | Only Python 3.14.6 was available; Odoo 20 source declares Python 3.12–3.13. |
-| Broad performance benchmark and query-scaling profile | NOT RUN | The suite now exercises 1,000 relevant lines in one posted invoice. A representative dataset across hundreds of distributors/thousands of invoices and query-scaling profile was not run. |
-| Real concurrent preview/source-write test | NOT RUN | Repeatable-read behavior was verified in source; tests were sequential and do not establish concurrency behavior under parallel requests. |
+| Targeted source-scoping/performance profile | PASS (Python 3.14.6 unsupported) | Disposable Odoo DB with 100 distributors, 1,002 posted customer invoices, and 10 posted credit notes. The target preview included 12 invoices / 10 refunds, returned 22 source rows, calculated 39 net units in 0.1744s and 30 SQL queries. This is a measured synthetic sample, not a broad load sweep. `.test/odoo-p03-performance.log`. |
+| Concurrent preview with source posting | PASS (Python 3.14.6 unsupported) | Two independent Odoo/PostgreSQL transactions: reader established its Repeatable Read snapshot; a writer posted a new relevant customer invoice and committed; reader returned the original 10-unit result, while a fresh preview returned 30 units with a changed fingerprint. `.test/odoo-p03-concurrency.log`; probe code `.test/concurrency_probe.py`. |
+| Broad load sweep / query scaling | NOT RUN | A single synthetic 100-distributor / 1,002-invoice dataset was measured. Larger dataset sweeps and production-like query plans were not run. |
 
 Final passing command (PowerShell; isolated UTF-8 PostgreSQL 18 cluster, port 55498; disposable DB and filestore only):
 
@@ -96,8 +97,8 @@ Final passing command (PowerShell; isolated UTF-8 PostgreSQL 18 cluster, port 55
 - Preview requires scheme operator/manager membership **and** standard accounting read access to `account.move` and `account.move.line`; this intentionally does not bypass accounting ACLs. Production role setup must grant these rights where previews are needed.
 - The source search is scoped by company, commercial partner, document type, posted state, date, and product. A same-company wrong-distributor credit note or a different-company credit note is excluded by normal source visibility and cannot be used to reduce the entitlement. No source data is returned for records outside the request scope.
 - Account data has no historical line-version store. As-of behavior uses current `create_date`/`write_date` as conservative availability guards; relevant after-cutoff changes block. This avoids fabricated historical quantities but cannot reconstruct data overwritten before the first preview.
-- A functional 1,000-line test now passes, but broad scale profiling, concurrent preview/source writes, and import/RPC boundary vectors beyond direct unauthorized method/ID calls remain unverified. No settlement claim snapshot is persisted. Period closure/claim generation, immutable evidence, approval, fulfillment, post-approval adjustments, and financial settlement remain P04–P08 work.
-- Odoo 20 supported-Python testing is still outstanding: this machine exposes Python 3.11.9 and 3.14.6 only. The successful run used 3.14.6, outside the declared 3.12–3.13 range. The addon is not ready to publish until a supported runtime and the remaining concurrency/scale checks are validated.
+- A functional 1,000-line test, targeted 1,002-invoice performance profile, and real concurrent preview/source-posting probe pass on the isolated database. Broad load sweeps and import-specific vectors beyond direct unauthorized method/ID calls remain unverified. No settlement claim snapshot is persisted. Period closure/claim generation, immutable evidence, approval, fulfillment, post-approval adjustments, and financial settlement remain P04–P08 work.
+- Odoo 20 supported-Python testing is still outstanding: this machine exposes Python 3.11.9 and 3.14.6 only. The successful run used 3.14.6, outside the declared 3.12–3.13 range. The addon is not ready to publish until the module suite passes on a supported runtime; broader load sweeps and import-specific security vectors remain additional validation.
 
 ## Acceptance checks
 
@@ -111,6 +112,6 @@ Final passing command (PowerShell; isolated UTF-8 PostgreSQL 18 cluster, port 55
 ## Security limitations and deferred work
 
 - Odoo superuser mode intentionally bypasses access controls. Future privileged services need their own explicit authorization and invariant checks.
-- Direct cross-company scheme-ID injection is now covered. Broader multi-company source-access combinations, import-specific vectors, and concurrent preview/accounting-write attempts still require targeted runtime tests. Tests used the discovered unsupported Python 3.14.6 runtime. A broad Odoo core test run also hit an unrelated core attachment memory assertion, so successful runs are filtered to this addon.
+- Direct cross-company scheme-ID injection and concurrent posting/read snapshot behavior are covered. Broader multi-company source-access combinations and import-specific vectors remain to be tested. Tests used the discovered unsupported Python 3.14.6 runtime. A broad Odoo core test run also hit an unrelated core attachment memory assertion, so successful module runs are filtered to this addon.
 - P03 provides read-only eligibility previews only. Period closing, claim generation, immutable document snapshot capture, stale claim revalidation, manager approval, zero-priced sales orders, delivery reconciliation, and late-return adjustment workflow remain deferred to P04–P08.
-- The addon is not ready to publish; supported-Python validation and deferred concurrency/broad performance work remain.
+- The addon is not ready to publish; supported-Python validation and broad load-sweep work remain.
