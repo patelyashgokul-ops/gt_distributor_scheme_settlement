@@ -2,7 +2,7 @@ from datetime import timedelta
 
 from odoo import fields
 from odoo.exceptions import AccessError, UserError, ValidationError
-from odoo.tests import tagged
+from odoo.tests import Form, tagged
 from odoo.addons.account.tests.common import AccountTestInvoicingCommon
 
 
@@ -245,6 +245,34 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
         with self.assertRaises(UserError):
             claim.with_user(self.manager).action_finalize_settlement()
         self.assertEqual(claim.state, "fulfillment_in_progress")
+
+    def test_p06_partial_delivery_and_backorder_keep_outstanding_entitlement(self):
+        claim = self._p06_approved_claim("P06-PARTIAL", reward=5)
+        order, warehouse = self._p06_prepare_order(claim)
+        self.env["stock.quant"]._update_available_quantity(
+            claim.approved_reward_product_id, warehouse.lot_stock_id, 5
+        )
+        picking = order.picking_ids.filtered(lambda item: item.picking_type_code == "outgoing")
+        picking.action_assign()
+        picking.move_ids.write({"quantity": 2, "picked": True})
+        backorder_action = picking.button_validate()
+        Form.from_action(self.env, backorder_action).save().process()
+        self.assertEqual(picking.state, "done")
+        claim.invalidate_recordset()
+        self.assertEqual(claim.fulfilled_quantity, 2)
+        self.assertEqual(claim.outstanding_quantity, 3)
+        self.assertEqual(claim.state, "fulfillment_in_progress")
+        backorder = order.picking_ids.filtered(lambda item: item.state not in ("done", "cancel"))
+        self.assertEqual(len(backorder), 1)
+        backorder.action_assign()
+        backorder.move_ids.write({"quantity": 3, "picked": True})
+        backorder.button_validate()
+        claim.invalidate_recordset()
+        self.assertEqual(claim.fulfilled_quantity, 5)
+        self.assertEqual(claim.outstanding_quantity, 0)
+        self.assertEqual(claim.state, "fulfillment_in_progress")
+        claim.with_user(self.manager).action_finalize_settlement()
+        self.assertEqual(claim.state, "settled")
 
     def test_p05_manager_approves_current_claim_and_freezes_entitlement(self):
         claim = self._p05_reviewable_claim("P05-APPROVE")
@@ -492,7 +520,7 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
         )
         validation = claim.with_user(self.independent_manager).action_revalidate_sources()
         self.assertEqual(validation["status"], "stale")
-        self.assertEqual(claim.state, "approved")
+        self.assertEqual(claim.state, "adjustment_required")
         self.assertEqual(claim.source_validation_status, "stale")
         self.assertEqual(claim.approved_reward_quantity, original_approved_quantity)
         self.assertEqual(claim.approved_by_id, self.independent_manager)
