@@ -6,7 +6,7 @@ This P01 foundation stores distributor schemes, purchase slabs, calculation peri
 
 ## Installation
 
-Copy this directory into an Odoo 20 Community addons path, update the Apps list, and install **Distributor Scheme Settlement**. Dependencies are `sale_management`, `account`, and `stock`, all Community addons in the inspected Odoo 20.0 checkout. The module does not modify Odoo core or vendor addons.
+Copy this directory into an Odoo 20 Community addons path, update the Apps list, and install **Distributor Scheme Settlement**. Dependencies are `sale`, `account`, `stock`, and `mail`, all Community addons in the inspected Odoo 20.0 checkout. The module does not modify Odoo core or vendor addons.
 
 The inspected Odoo 20 checkout declares Python 3.12–3.13 and PostgreSQL 16 minimum. Use a supported Python runtime and a disposable PostgreSQL database for automated tests. Run:
 
@@ -40,4 +40,4 @@ These are design contracts, not implemented behavior. Future services must expos
 
 ## License
 
-The manifest declares `OPL-1`. This addon contains no copied Odoo source and depends only on the inspected Community addons, whose manifests declare LGPL-3. Odoo's license documentation describes OPL-1 as allowing modules to use Odoo as a library and to be distributed under a compatible license; the Community LGPL dependencies do not prevent declaring this addon OPL-1. Confirm publisher ownership and final distribution terms before release.
+The manifest declares `OPL-1`. This addon contains no copied Odoo source and depends only on the inspected Community addons, whose manifests declare LGPL-3. Odoo's [license terms](https://www.odoo.com/documentation/17.0/legal/licenses.html) describe modules using Odoo as a library and allow their distribution under a compatible license; its [manifest documentation](https://www.odoo.com/documentation/master/developer/reference/backend/module.html) recognizes `OPL-1`. The Community LGPL dependencies do not prevent declaring this addon OPL-1. Confirm publisher ownership and final distribution terms before release.

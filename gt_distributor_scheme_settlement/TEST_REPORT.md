@@ -20,7 +20,7 @@ Date: 2026-11-20
 | Odoo 20 Community source discovered | PASS | `odoo/release.py` reports 20.0; Community addons tree is present. |
 | Runtime / PostgreSQL config verified | PARTIAL | Python 3.14.6 and PostgreSQL 18 service found; supported Python 3.12–3.13 runtime and a dedicated disposable DB configuration were not available. |
 | Required source model/API inspection | PASS | All named source models and baseline accounting, product, partner, and stock fields listed above were inspected. Future workflow APIs still need focused verification when implemented. |
-| Manifest metadata and dependency declarations | PASS | Odoo 20 manifest structure; dependencies are Community addons `sale_management`, `account`, `stock`; version `20.0.1.0.0`. |
+| Manifest metadata and dependency declarations | PASS | Odoo 20 manifest structure; dependencies are Community addons `sale`, `account`, `stock`, `mail`; version `20.0.1.0.0`. |
 | OPL-1 metadata and dependency licensing | PASS | OPL-1 manifest value; dependency manifests declare LGPL-3; no source copied. Publisher/distribution legal review remains outside this technical check. |
 | Python syntax compilation | PASS | All 13 addon Python files compiled with Python 3.14.6. Odoo runtime compatibility is separate and NOT RUN. |
 | XML well-formedness and manifest literal parsing | PASS | All 8 XML files parsed and manifest loaded as a Python literal. This does not validate Odoo's XML schema/registry. |

@@ -7,7 +7,7 @@
     "maintainer": "Golok Technology",
     "support": "patelyash.gokul@gmail.com",
     "license": "OPL-1",
-    "depends": ["sale_management", "account", "stock"],
+    "depends": ["sale", "account", "stock", "mail"],
     "data": [
         "data/sequence.xml",
         "security/groups.xml",
