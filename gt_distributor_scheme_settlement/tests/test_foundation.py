@@ -32,6 +32,11 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
             company_id=cls.company_a.id,
             uom_id=cls.uom_unit.id,
         )
+        cls.other_product_a = cls._create_product(
+            name="Scheme Test Non Qualifying Product",
+            company_id=cls.company_a.id,
+            uom_id=cls.uom_unit.id,
+        )
         cls.product_b = cls._create_product(
             name="Scheme Test Company B Product",
             company_id=cls.company_b.id,
@@ -108,6 +113,7 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
             "gt.distributor.scheme.claim.source": {"claim_id", "move_id", "invoice_line_id", "snapshot_payload"},
             "gt.distributor.scheme.claim.adjustment": {"claim_id", "quantity_delta", "reason"},
             "gt.distributor.scheme.audit": {"company_id", "event_type", "actor_id", "event_date", "evidence"},
+            "gt.distributor.scheme.preview.wizard": {"scheme_id", "distributor_id", "date_start", "date_end", "as_of", "calculation_status", "source_fingerprint"},
         }
         for model_name, field_names in required.items():
             self.assertTrue(field_names.issubset(self.env[model_name]._fields), model_name)
@@ -236,6 +242,55 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
         self.assertEqual(result["invoice_count"], 1)
         self.assertEqual(len([row for row in result["invoice_sources"] if row["line_classification"] == "ZERO_VALUE"]), 2)
 
+    def test_customer_invoice_company_product_and_invoice_date_filters(self):
+        self._basic_slab()
+        self._create_invoice_one_line(product_id=self.product_a, quantity=5, invoice_date="2026-01-10",
+                                      partner_id=self.distributor.id, company_id=self.company_a.id, post=True)
+        self._create_invoice_one_line(product_id=self.other_product_a, quantity=50, invoice_date="2026-01-10",
+                                      partner_id=self.distributor.id, company_id=self.company_a.id, post=True)
+        self._create_invoice_one_line(product_id=self.product_a, quantity=70, invoice_date="2026-02-10",
+                                      partner_id=self.distributor.id, company_id=self.company_a.id, post=True)
+        self._create_invoice_one_line(move_type="in_invoice", product_id=self.product_a, quantity=90,
+                                      invoice_date="2026-01-15", partner_id=self.distributor.id,
+                                      company_id=self.company_a.id, post=True)
+        result = self._preview()
+        self.assertEqual(result["gross_quantity"], 5)
+        self.assertEqual(result["invoice_count"], 1)
+
+    def test_unposted_credit_note_does_not_reduce_preview(self):
+        self._basic_slab()
+        invoice = self._create_invoice_one_line(product_id=self.product_a, quantity=10,
+                                                invoice_date="2026-01-10", partner_id=self.distributor.id, post=True)
+        self._create_invoice_one_line(move_type="out_refund", product_id=self.product_a, quantity=5,
+                                      invoice_date="2026-01-20", partner_id=self.distributor.id,
+                                      reversed_entry_id=invoice.id, post=False)
+        result = self._preview()
+        self.assertEqual(result["refund_quantity"], 0)
+        self.assertEqual(result["gross_quantity"], 10)
+
+    def test_incompatible_uom_blocks_eligibility(self):
+        self._basic_slab()
+        kg = self.env.ref("uom.product_uom_kgm")
+        invoice = self._create_invoice_one_line(product_id=self.product_a, quantity=10,
+                                                invoice_date="2026-01-10", partner_id=self.distributor.id,
+                                                post=False)
+        product_line = invoice.invoice_line_ids
+        product_line.write({"product_uom_id": kg.id})
+        invoice.action_post()
+        result = self._preview()
+        self.assertEqual(result["calculation_status"], "BLOCKED")
+        self.assertIn("INCOMPATIBLE_UOM", {item["code"] for item in result["exceptions"]})
+
+    def test_quantity_just_below_exclusive_boundary_does_not_round_up(self):
+        low = self._basic_slab(minimum=1, maximum=200, reward=1)
+        high = self._basic_slab(minimum=200, reward=5)
+        self._create_invoice_one_line(product_id=self.product_a, quantity=199.999999,
+                                      invoice_date="2026-01-10", partner_id=self.distributor.id, post=True)
+        result = self._preview()
+        self.assertEqual(result["calculation_status"], "ELIGIBLE")
+        self.assertEqual(result["slab_id"], low.id)
+        self.assertNotEqual(result["slab_id"], high.id)
+
     def test_multiple_partial_credit_notes_and_late_refund_attribution(self):
         self.scheme.write({"qualifying_uom_id": self.uom_dozen.id})
         self._basic_slab(minimum=1, maximum=8, reward=1)
@@ -322,6 +377,17 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
         result = self._preview()
         self.assertEqual(result["calculation_status"], "ELIGIBLE")
         self.assertEqual(self.env["gt.distributor.scheme.claim"].search_count([]), claims_before)
+
+    def test_preview_wizard_results_cannot_be_forged_by_orm_write(self):
+        wizard = self.env["gt.distributor.scheme.preview.wizard"].with_user(self.manager).create({
+            "scheme_id": self.scheme.id,
+            "distributor_id": self.distributor.id,
+            "date_start": "2026-01-01",
+            "date_end": "2026-01-31",
+            "as_of": fields.Datetime.now(),
+        })
+        with self.assertRaises(AccessError):
+            wizard.write({"calculation_status": "ELIGIBLE", "reward_quantity": 999})
 
     def test_native_preview_wizard_and_server_side_role_check(self):
         self._basic_slab()
