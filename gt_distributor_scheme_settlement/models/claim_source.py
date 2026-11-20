@@ -12,6 +12,7 @@ class DistributorSchemeClaimSource(models.Model):
     _check_company_auto = True
 
     claim_id = fields.Many2one("gt.distributor.scheme.claim", required=True, ondelete="restrict", check_company=True, index=True)
+    revision_id = fields.Many2one("gt.distributor.scheme.claim.revision", ondelete="restrict", check_company=True, index=True, help="Set only when this line was first allocated by a later claim revision.")
     scheme_id = fields.Many2one(related="claim_id.scheme_id", store=True, readonly=True, index=True)
     period_id = fields.Many2one(related="claim_id.period_id", store=True, readonly=True, index=True)
     distributor_id = fields.Many2one(related="claim_id.distributor_id", store=True, readonly=True, index=True)
@@ -52,7 +53,7 @@ class DistributorSchemeClaimSource(models.Model):
             raise ValidationError(_("An accounting line is already allocated to a settlement entitlement."))
         return super().create(vals_list)
 
-    @api.constrains("claim_id", "scheme_id", "period_id", "distributor_id", "company_id", "move_id", "invoice_line_id", "origin_invoice_id", "product_id", "source_quantity", "quantity")
+    @api.constrains("claim_id", "revision_id", "scheme_id", "period_id", "distributor_id", "company_id", "move_id", "invoice_line_id", "origin_invoice_id", "product_id", "source_quantity", "quantity")
     def _check_source_identity(self):
         for rec in self:
             line = rec.invoice_line_id
@@ -62,6 +63,8 @@ class DistributorSchemeClaimSource(models.Model):
                 raise ValidationError(_("Source allocations require a closed scheme period."))
             if rec.scheme_id != claim.scheme_id or rec.period_id != claim.period_id or rec.distributor_id != claim.distributor_id or rec.company_id != claim.company_id:
                 raise ValidationError(_("Source allocation ownership must match its claim."))
+            if rec.revision_id and rec.revision_id.claim_id != claim:
+                raise ValidationError(_("A revised source allocation must belong to the same logical claim."))
             if line.move_id != move:
                 raise ValidationError(_("The source accounting line must belong to the selected document."))
             if move.state != "posted" or move.company_id != rec.company_id or move.commercial_partner_id != rec.distributor_id.commercial_partner_id:

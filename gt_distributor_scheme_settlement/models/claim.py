@@ -7,7 +7,9 @@ from odoo import api, fields, models, _
 from odoo.exceptions import AccessError, UserError, ValidationError
 from odoo.tools.float_utils import float_compare
 
-from .service_tokens import CLAIM_CREATE_TOKEN, CLAIM_WRITE_TOKEN
+from .service_tokens import (
+    CLAIM_CREATE_TOKEN, CLAIM_WRITE_TOKEN, REVISION_CREATE_TOKEN, REVISION_WRITE_TOKEN,
+)
 
 
 class DistributorSchemeClaim(models.Model):
@@ -50,6 +52,24 @@ class DistributorSchemeClaim(models.Model):
     reviewed_by_id = fields.Many2one("res.users", readonly=True, copy=False)
     reviewed_at = fields.Datetime(readonly=True, copy=False)
     review_note = fields.Text(readonly=True, copy=False)
+    active_revision_id = fields.Many2one("gt.distributor.scheme.claim.revision", readonly=True, copy=False, ondelete="restrict", check_company=True)
+    revision_ids = fields.One2many("gt.distributor.scheme.claim.revision", "claim_id", string="Entitlement Revisions", readonly=True)
+    decision_note = fields.Text(readonly=True, copy=False)
+    rejected_by_id = fields.Many2one("res.users", readonly=True, copy=False)
+    rejected_at = fields.Datetime(readonly=True, copy=False)
+    rejection_reason = fields.Text(readonly=True, copy=False)
+    approved_revision_id = fields.Many2one("gt.distributor.scheme.claim.revision", readonly=True, copy=False, ondelete="restrict", check_company=True)
+    approved_gross_quantity = fields.Float(readonly=True, copy=False, digits="Product Unit of Measure")
+    approved_refund_quantity = fields.Float(readonly=True, copy=False, digits="Product Unit of Measure")
+    approved_net_quantity = fields.Float(readonly=True, copy=False, digits="Product Unit of Measure")
+    approved_slab_id = fields.Many2one("gt.distributor.scheme.slab", readonly=True, copy=False, ondelete="restrict")
+    approved_reward_product_id = fields.Many2one("product.product", readonly=True, copy=False, check_company=True)
+    approved_reward_uom_id = fields.Many2one("uom.uom", readonly=True, copy=False)
+    approved_reward_quantity = fields.Float(readonly=True, copy=False, digits="Product Unit of Measure")
+    approved_source_fingerprint = fields.Char(readonly=True, copy=False, index=True)
+    approved_snapshot_fingerprint = fields.Char(readonly=True, copy=False, index=True)
+    approval_evidence = fields.Json(readonly=True, copy=False)
+    approval_evidence_hash = fields.Char(readonly=True, copy=False, index=True)
     source_validation_status = fields.Selection([
         ("current", "Current"), ("stale", "Stale"), ("blocked", "Blocked"),
     ], required=True, default="current", readonly=True, copy=False, index=True)
@@ -99,7 +119,12 @@ class DistributorSchemeClaim(models.Model):
         "created_by_id", "submitted_by_id", "submitted_at", "reviewed_by_id", "reviewed_at",
         "review_note", "source_validation_status", "source_change_category",
         "source_validation_at", "source_validation_result", "state", "approved_by_id",
-        "approved_at", "fulfillment_order_id", "fulfillment_picking_ids", "source_ids",
+        "approved_at", "active_revision_id", "revision_ids", "decision_note", "rejected_by_id",
+        "rejected_at", "rejection_reason", "approved_revision_id", "approved_gross_quantity",
+        "approved_refund_quantity", "approved_net_quantity", "approved_slab_id",
+        "approved_reward_product_id", "approved_reward_uom_id", "approved_reward_quantity",
+        "approved_source_fingerprint", "approved_snapshot_fingerprint", "approval_evidence",
+        "approval_evidence_hash", "fulfillment_order_id", "fulfillment_picking_ids", "source_ids",
         "adjustment_ids", "audit_ids", "invoice_source_ids", "refund_source_ids",
     }
 
@@ -165,6 +190,24 @@ class DistributorSchemeClaim(models.Model):
                 raise ValidationError(_("The selected purchase slab must belong to the claim scheme."))
             if rec.qualifying_product_id and rec.qualifying_product_id != rec.scheme_id.qualifying_product_id:
                 raise ValidationError(_("The qualifying product must match the scheme configuration."))
+            if rec.active_revision_id and rec.active_revision_id.claim_id != rec:
+                raise ValidationError(_("The active revision must belong to this logical claim."))
+            if rec.approved_revision_id and rec.approved_revision_id.claim_id != rec:
+                raise ValidationError(_("The approved revision must belong to this logical claim."))
+
+    @api.constrains("state", "approved_by_id", "approved_at", "approved_reward_quantity", "approval_evidence", "approval_evidence_hash", "approved_revision_id")
+    def _check_approval_evidence(self):
+        for claim in self:
+            if claim.state == "approved":
+                if not all((claim.approved_by_id, claim.approved_at, claim.approved_reward_quantity > 0,
+                            claim.approved_reward_product_id, claim.approved_reward_uom_id,
+                            claim.approved_source_fingerprint, claim.approved_snapshot_fingerprint,
+                            claim.approval_evidence, claim.approval_evidence_hash)):
+                    raise ValidationError(_("An approved claim must have a complete frozen approval evidence record."))
+                if claim._hash_snapshot(claim.approval_evidence) != claim.approval_evidence_hash:
+                    raise ValidationError(_("Approval evidence integrity verification failed."))
+            elif claim.approved_by_id or claim.approved_at or claim.approval_evidence_hash:
+                raise ValidationError(_("Approval metadata is valid only for an approved claim."))
 
     @api.model
     def _canonical_value(self, value):
@@ -345,7 +388,8 @@ class DistributorSchemeClaim(models.Model):
             raise ValidationError(_("The protected claim snapshot failed its integrity check."))
         source_payload = self.snapshot_payload.get("sources", [])
         allocated_count = sum(row.get("line_classification") == "QUALIFYING" for row in source_payload)
-        if allocated_count != self.source_evidence_count or len(self.source_ids) != self.source_evidence_count:
+        original_sources = self.source_ids.filtered(lambda source: not source.revision_id)
+        if allocated_count != self.source_evidence_count or len(original_sources) != self.source_evidence_count:
             raise ValidationError(_("The protected claim snapshot source count does not match its evidence."))
         return True
 
