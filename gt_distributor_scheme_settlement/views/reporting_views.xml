@@ -43,7 +43,12 @@
         <field name="res_model">gt.distributor.scheme.dashboard</field>
         <field name="view_mode">form</field>
         <field name="target">current</field>
-        <field name="context">{'default_company_id': allowed_company_ids and allowed_company_ids[0] or False}</field>
+    </record>
+    <record id="action_scheme_reporting" model="ir.actions.act_window">
+        <field name="name">Settlement Reports</field>
+        <field name="res_model">gt.distributor.scheme.report.wizard</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
     </record>
     <record id="view_scheme_report_wizard_form" model="ir.ui.view">
         <field name="name">gt.distributor.scheme.report.wizard.form</field>

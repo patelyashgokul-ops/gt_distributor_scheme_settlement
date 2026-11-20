@@ -1491,6 +1491,97 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
             "view_distributor_scheme_claim_search", "view_distributor_scheme_claim_decision_wizard_form",
             "menu_distributor_scheme_root", "menu_distributor_schemes",
             "menu_distributor_slabs", "menu_distributor_periods", "menu_distributor_claims", "menu_distributor_configuration",
+            "view_scheme_dashboard_form", "view_scheme_report_wizard_form", "menu_distributor_scheme_dashboard",
+            "menu_distributor_reporting", "menu_distributor_settlement_report",
         ]
         for xml_id in refs:
             self.assertTrue(self.env.ref(f"gt_distributor_scheme_settlement.{xml_id}"), xml_id)
+
+    def test_p07_dashboard_company_scoped_metrics(self):
+        claim = self._p06_approved_claim("P07-DASHBOARD")
+        dashboard = self.env["gt.distributor.scheme.dashboard"].with_user(self.manager).create({
+            "company_id": self.company_a.id,
+            "scheme_id": claim.scheme_id.id,
+            "distributor_id": self.distributor.id,
+        })
+        self.assertEqual(dashboard.approved_count, 1)
+        self.assertEqual(dashboard.outstanding_delivery_count, 1)
+        self.assertEqual(dashboard.blocked_outstanding_count, 0)
+        with self.assertRaises(AccessError):
+            self.env["gt.distributor.scheme.dashboard"].with_user(self.operator).create({
+                "company_id": self.company_b.id,
+            })._get_metrics()
+
+    def test_p07_distributor_and_outstanding_reports_use_approved_and_stock_values(self):
+        claim = self._p06_approved_claim("P07-DIST-REPORT", reward=5)
+        wizard = self.env["gt.distributor.scheme.report.wizard"].with_user(self.operator).create({
+            "company_id": self.company_a.id, "report_type": "distributor",
+            "scheme_id": claim.scheme_id.id,
+        })
+        wizard.action_generate()
+        line = wizard.line_ids
+        self.assertEqual(len(line), 1)
+        self.assertEqual(line.approved_quantity, 5)
+        self.assertEqual(line.delivered_quantity, 0)
+        self.assertEqual(line.outstanding_quantity, 5)
+        self.assertEqual(line.releasable_quantity, 5)
+        self.assertEqual(line.source_validation_status, "current")
+        wizard.write({"report_type": "outstanding"})
+        self.assertFalse(wizard.generated_at)
+        self.assertFalse(wizard.line_ids)
+        wizard.action_generate()
+        self.assertEqual(wizard.row_count, 1)
+
+    def test_p07_scheme_report_groups_by_reward_product_and_uom(self):
+        claim = self._p06_approved_claim("P07-SCHEME-REPORT", reward=5)
+        wizard = self.env["gt.distributor.scheme.report.wizard"].with_user(self.manager).create({
+            "company_id": self.company_a.id, "report_type": "scheme", "scheme_id": claim.scheme_id.id,
+        })
+        wizard.action_generate()
+        row = wizard.line_ids
+        self.assertEqual(len(row), 1)
+        self.assertEqual(row.approved_quantity, 5)
+        self.assertEqual(row.reward_product_id, claim.approved_reward_product_id)
+        self.assertEqual(row.reward_uom_id, claim.approved_reward_uom_id)
+        self.assertEqual(row.eligible_distributor_count, 1)
+
+    def test_p07_csv_and_xlsx_exports_treat_untrusted_text_as_literal(self):
+        original_name = self.distributor.name
+        self.distributor.name = "\t=HYPERLINK(\"https://example.invalid\",\"x\")"
+        claim = self._p06_approved_claim("P07-EXPORT-INJECTION", reward=5)
+        wizard = self.env["gt.distributor.scheme.report.wizard"].with_user(self.manager).create({
+            "company_id": self.company_a.id, "report_type": "distributor", "scheme_id": claim.scheme_id.id,
+        })
+        wizard.action_generate()
+        csv_data = wizard._render_csv()
+        self.assertTrue(csv_data.startswith(b"\xef\xbb\xbf"))
+        self.assertIn(b"'\t=HYPERLINK", csv_data)
+        self.assertIn("Scheme Test Distributor".encode(), csv_data) if original_name in csv_data.decode("utf-8-sig") else None
+        xlsx_data = wizard._render_xlsx()
+        import io
+        from openpyxl import load_workbook
+        sheet = load_workbook(io.BytesIO(xlsx_data), read_only=True, data_only=False).active
+        self.assertTrue(all(cell.data_type != "f" for row in sheet.iter_rows() for cell in row))
+        self.assertTrue(any(str(cell.value).startswith("'\t=HYPERLINK") for row in sheet.iter_rows() for cell in row if cell.value))
+        self.distributor.name = original_name
+
+    def test_p07_report_company_scope_rejects_arbitrary_company_filter(self):
+        wizard = self.env["gt.distributor.scheme.report.wizard"].with_user(self.operator).create({
+            "company_id": self.company_a.id, "report_type": "distributor",
+        })
+        with self.assertRaises(AccessError):
+            wizard.write({"company_id": self.company_b.id})
+        with self.assertRaises(AccessError):
+            self.env["gt.distributor.scheme.report.wizard"].with_user(self.operator).create({
+                "company_id": self.company_b.id,
+            }).action_generate()
+
+    def test_p07_report_output_cannot_be_forged_through_orm_or_context(self):
+        wizard = self.env["gt.distributor.scheme.report.wizard"].with_user(self.manager).create({
+            "company_id": self.company_a.id,
+        })
+        with self.assertRaises(AccessError):
+            wizard.with_context(_gt_report_write=True).write({"row_count": 99, "generated_at": fields.Datetime.now()})
+        Line = self.env["gt.distributor.scheme.report.line"].with_user(self.manager)
+        with self.assertRaises(AccessError):
+            Line.with_context(_gt_report_line_create=True).create({"wizard_id": wizard.id})

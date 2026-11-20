@@ -167,7 +167,8 @@ class DistributorSchemeReportWizard(models.TransientModel):
             return False
         deliverable = outstanding if not blocked and claim.state in ("approved", "fulfillment_in_progress") else 0.0
         return {
-            "report_type": report_type, "company_id": claim.company_id.id, "claim_id": claim.id,
+            "report_type": report_type, "company_id": claim.company_id.id, "company_name": claim.company_id.display_name,
+            "scheme_state": claim.scheme_id.state, "claim_id": claim.id,
             "scheme_id": claim.scheme_id.id, "period_id": claim.period_id.id,
             "distributor_id": claim.distributor_id.id,
             "scheme_name": claim.scheme_id.name, "distributor_name": claim.distributor_id.display_name,
@@ -248,7 +249,7 @@ class DistributorSchemeReportWizard(models.TransientModel):
             row["open_adjustments"] += len(claim.adjustment_ids.filtered(lambda a: a.status in ("open", "under_review", "blocked", "reviewed")))
         # A distributor may hold more than one claim for this scheme over time; count it once.
         for key, row in grouped.items():
-            row["eligible_distributor_count"] = len(claims.filtered(lambda c: c.scheme_id.id == key[1]).mapped("distributor_id"))
+            row["eligible_distributor_count"] = len(self.env["gt.distributor.scheme"].browse(key[1]).distributor_ids)
         return list(grouped.values())
 
     def action_generate(self):
@@ -266,6 +267,7 @@ class DistributorSchemeReportWizard(models.TransientModel):
         self.ensure_one()
         self.check_access("read")
         self._assert_report_access()
+        file_type = self.env.context.get("file_type", file_type)
         if not self.generated_at:
             raise UserError(_("Generate the report before exporting it."))
         if file_type not in ("csv", "xlsx"):
@@ -273,9 +275,17 @@ class DistributorSchemeReportWizard(models.TransientModel):
         return {"type": "ir.actions.act_url", "url": f"/gt_scheme_settlement/report/{self.id}/{file_type}", "target": "self"}
 
     def write(self, vals):
-        if self.env.context.get("_gt_report_write") is not REPORT_TOKEN and set(vals) - {"report_type", "company_id", "scheme_id", "distributor_id", "date_from", "date_to"}:
+        internal = self.env.context.get("_gt_report_write") is REPORT_TOKEN
+        filter_fields = {"report_type", "company_id", "scheme_id", "distributor_id", "date_from", "date_to"}
+        if not internal and set(vals) - filter_fields:
             raise AccessError(_("Report output fields are service managed."))
-        return super().write(vals)
+        if not internal and vals.get("company_id"):
+            self.env["gt.distributor.scheme.dashboard"]._validate_scope(vals["company_id"])
+        result = super().write(vals)
+        if not internal and set(vals).intersection(filter_fields):
+            self.with_context(_gt_report_write=REPORT_TOKEN).write({"generated_at": False, "row_count": 0})
+            self.line_ids.with_context(_gt_report_line_cleanup=REPORT_TOKEN).unlink()
+        return result
 
 
 class DistributorSchemeReportLine(models.TransientModel):

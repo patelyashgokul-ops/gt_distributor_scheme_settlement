@@ -4,7 +4,7 @@
     <menuitem id="menu_distributor_schemes" name="Schemes" parent="menu_distributor_scheme_root" action="action_distributor_schemes" sequence="10" groups="group_scheme_operator,group_scheme_manager,group_scheme_auditor"/>
     <menuitem id="menu_distributor_claims" name="Settlement Claims" parent="menu_distributor_scheme_root" action="action_distributor_scheme_claims" sequence="20" groups="group_scheme_operator,group_scheme_manager,group_scheme_auditor"/>
     <menuitem id="menu_distributor_reporting" name="Reporting" parent="menu_distributor_scheme_root" sequence="30" groups="group_scheme_operator,group_scheme_manager,group_scheme_auditor"/>
-    <menuitem id="menu_distributor_settlement_report" name="Settlement Reports" parent="menu_distributor_reporting" action="action_scheme_dashboard" sequence="10" groups="group_scheme_operator,group_scheme_manager,group_scheme_auditor"/>
+    <menuitem id="menu_distributor_settlement_report" name="Settlement Reports" parent="menu_distributor_reporting" action="action_scheme_reporting" sequence="10" groups="group_scheme_operator,group_scheme_manager,group_scheme_auditor"/>
     <menuitem id="menu_distributor_configuration" name="Configuration" parent="menu_distributor_scheme_root" sequence="90" groups="group_scheme_manager"/>
     <menuitem id="menu_distributor_slabs" name="Purchase Slabs" parent="menu_distributor_configuration" action="action_distributor_scheme_slabs" sequence="10"/>
     <menuitem id="menu_distributor_periods" name="Scheme Periods" parent="menu_distributor_configuration" action="action_distributor_scheme_periods" sequence="20"/>
