@@ -1,4 +1,4 @@
-# P01-P02 Verification Report
+# P01-P03 Verification Report
 
 Date: 2026-11-20
 
@@ -6,7 +6,7 @@ Date: 2026-11-20
 
 - Odoo source: `C:\PycharmProjects\odoo20\odoo-20.0`, release source reports 20.0.0 final.
 - Community addons: `C:\PycharmProjects\odoo20\odoo-20.0\addons`.
-- Project virtual environment: `C:\PycharmProjects\odoo20\.venv`, Python 3.14.6. It has `psycopg2` and `lxml`; Odoo is loaded from source.
+- Project virtual environment: `C:\PycharmProjects\odoo20\.venv`, Python 3.14.6. System Python 3.11.9 is also installed; neither is in Odoo 20's supported 3.12–3.13 range. The project environment has `psycopg2` and `lxml`; Odoo is loaded from source.
 - Odoo 20 source declares Python 3.12 minimum, Python 3.14 maximum exclusive, and PostgreSQL 16 minimum. Therefore the discovered Python 3.14.6 runtime is outside the supported range.
 - PostgreSQL 18 Windows service is running. No credentials or database contents were inspected. No existing database was used.
 - An isolated PostgreSQL 18 cluster initialized successfully under `.test/pgdata`. `pg_ctl start` failed with Windows sandbox restricted-token errors, but launching `postgres.exe` directly in the foreground worked on port 55498. Tests used only a disposable database and `.test` filestore; both were removed after verification. No existing service database was used.
@@ -68,16 +68,18 @@ Odoo reported `0 failed, 0 error(s) of 11 tests` in `.test/odoo-p02-rerun.log`. 
 | Check | Result | Evidence |
 |---|---|---|
 | Clean install, registry, wizard view and ACL load | PASS (Python 3.14.6 unsupported) | Fresh disposable database `gt_scheme_p03_test`; Odoo loaded the addon, new transient model, ACL rows, and preview XML in the final clean install run. |
-| P01/P02 regression and P03 ORM suite | PASS (Python 3.14.6 unsupported) | 28 addon test methods started. Odoo final result: `0 failed, 0 error(s) of 30 tests`; module test statistics: 30 tests. `.test/odoo-p03-final.log`. |
+| P01/P02 regression and P03 ORM suite | PASS (Python 3.14.6 unsupported) | Fresh disposable DB. Odoo final result: `0 failed, 0 error(s) of 31 tests`; module statistics: 31 tests, 7,491 queries. 29 addon test methods started. `.test/odoo-p03-completion.log`. |
+| 1,000-line accounting volume check | PASS (Python 3.14.6 unsupported) | Real posted invoice containing 1,000 qualifying product lines was previewed; all lines were counted once, with correct aggregate quantity and one source invoice. Included in the final suite. This is a functional volume check, not a broad load benchmark. |
+| Explicit cross-company scheme-ID injection | PASS (Python 3.14.6 unsupported) | A company-A manager directly called the calculator with a company-B scheme ID and was denied by server-side access checks. Included in the final suite. |
 | Python syntax / XML / manifest | PASS | 15 Python files parsed, 8 XML files parsed, manifest literal loaded using Python 3.14.6 after final source changes. |
 | P03 production Python support | NOT RUN | Only Python 3.14.6 was available; Odoo 20 source declares Python 3.12–3.13. |
-| Large-volume performance benchmark | NOT RUN | No 1,000-line or representative distributor-volume benchmark was executed. Final Odoo module test stats reported 6,303 queries; that is not a performance benchmark. |
+| Broad performance benchmark and query-scaling profile | NOT RUN | The suite now exercises 1,000 relevant lines in one posted invoice. A representative dataset across hundreds of distributors/thousands of invoices and query-scaling profile was not run. |
 | Real concurrent preview/source-write test | NOT RUN | Repeatable-read behavior was verified in source; tests were sequential and do not establish concurrency behavior under parallel requests. |
 
 Final passing command (PowerShell; isolated UTF-8 PostgreSQL 18 cluster, port 55498; disposable DB and filestore only):
 
 ```powershell
-& C:\PycharmProjects\odoo20\.venv\Scripts\python.exe C:\PycharmProjects\odoo20\odoo-20.0\odoo-bin --addons-path=C:\PycharmProjects\odoo20\odoo-20.0\odoo\addons,C:\PycharmProjects\odoo20\custom_addons --data-dir=C:\PycharmProjects\odoo20\custom_addons\gt_distributor_scheme_settlement\.test\odoo-data --db_host=127.0.0.1 --db_port=55498 --db_user=odoo_test --db_password= --database=gt_scheme_p03_test --init=gt_distributor_scheme_settlement --without-demo --test-enable --test-tags=/gt_distributor_scheme_settlement --stop-after-init --http-port=8095 --logfile=C:\PycharmProjects\odoo20\custom_addons\gt_distributor_scheme_settlement\.test\odoo-p03-final.log
+& C:\PycharmProjects\odoo20\.venv\Scripts\python.exe C:\PycharmProjects\odoo20\odoo-20.0\odoo-bin --addons-path=C:\PycharmProjects\odoo20\odoo-20.0\odoo\addons,C:\PycharmProjects\odoo20\custom_addons --data-dir=C:\PycharmProjects\odoo20\custom_addons\gt_distributor_scheme_settlement\.test\odoo-data --db_host=127.0.0.1 --db_port=55498 --db_user=odoo_test --db_password= --database=gt_scheme_p03_final_test --init=gt_distributor_scheme_settlement --without-demo --test-enable --test-tags=/gt_distributor_scheme_settlement --stop-after-init --http-port=8095 --logfile=C:\PycharmProjects\odoo20\custom_addons\gt_distributor_scheme_settlement\.test\odoo-p03-completion.log
 ```
 
 ### Acceptance matrix
@@ -94,8 +96,8 @@ Final passing command (PowerShell; isolated UTF-8 PostgreSQL 18 cluster, port 55
 - Preview requires scheme operator/manager membership **and** standard accounting read access to `account.move` and `account.move.line`; this intentionally does not bypass accounting ACLs. Production role setup must grant these rights where previews are needed.
 - The source search is scoped by company, commercial partner, document type, posted state, date, and product. A same-company wrong-distributor credit note or a different-company credit note is excluded by normal source visibility and cannot be used to reduce the entitlement. No source data is returned for records outside the request scope.
 - Account data has no historical line-version store. As-of behavior uses current `create_date`/`write_date` as conservative availability guards; relevant after-cutoff changes block. This avoids fabricated historical quantities but cannot reconstruct data overwritten before the first preview.
-- Performance with 1,000+ invoice lines, parallel preview calls, direct import vectors, and parallel accounting writes remain unverified. No settlement claim snapshot is persisted. Period closure/claim generation, immutable evidence, approval, fulfillment, post-approval adjustments, and financial settlement remain P04–P08 work.
-- P03 is not ready to publish; supported-Python testing and the deferred scale/concurrency checks are still required before a production release.
+- A functional 1,000-line test now passes, but broad scale profiling, concurrent preview/source writes, and import/RPC boundary vectors beyond direct unauthorized method/ID calls remain unverified. No settlement claim snapshot is persisted. Period closure/claim generation, immutable evidence, approval, fulfillment, post-approval adjustments, and financial settlement remain P04–P08 work.
+- Odoo 20 supported-Python testing is still outstanding: this machine exposes Python 3.11.9 and 3.14.6 only. The successful run used 3.14.6, outside the declared 3.12–3.13 range. The addon is not ready to publish until a supported runtime and the remaining concurrency/scale checks are validated.
 
 ## Acceptance checks
 
@@ -109,6 +111,6 @@ Final passing command (PowerShell; isolated UTF-8 PostgreSQL 18 cluster, port 55
 ## Security limitations and deferred work
 
 - Odoo superuser mode intentionally bypasses access controls. Future privileged services need their own explicit authorization and invariant checks.
-- Full multi-company access combinations, import/RPC vectors, and concurrent attempts still require targeted runtime tests. Tests used the discovered unsupported Python 3.14.6 runtime. A broad Odoo core test run also hit an unrelated core attachment memory assertion, so the successful run was filtered to this addon.
+- Direct cross-company scheme-ID injection is now covered. Broader multi-company source-access combinations, import-specific vectors, and concurrent preview/accounting-write attempts still require targeted runtime tests. Tests used the discovered unsupported Python 3.14.6 runtime. A broad Odoo core test run also hit an unrelated core attachment memory assertion, so successful runs are filtered to this addon.
 - P03 provides read-only eligibility previews only. Period closing, claim generation, immutable document snapshot capture, stale claim revalidation, manager approval, zero-priced sales orders, delivery reconciliation, and late-return adjustment workflow remain deferred to P04–P08.
-- The addon is not ready to publish; supported-Python validation and deferred concurrency/performance work remain.
+- The addon is not ready to publish; supported-Python validation and deferred concurrency/broad performance work remain.
