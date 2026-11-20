@@ -57,7 +57,7 @@
                 <field name="name"/><field name="code"/><field name="qualifying_product_id"/><field name="distributor_ids"/>
                 <filter name="draft" string="Draft" domain="[('state','=','draft')]"/>
                 <filter name="active" string="Active" domain="[('state','=','active')]"/>
-                <group expand="0" string="Group By"><filter name="group_state" string="State" context="{'group_by':'state'}"/><filter name="group_company" string="Company" context="{'group_by':'company_id'}"/></group>
+                <group><filter name="group_state" string="State" context="{'group_by':'state'}"/><filter name="group_company" string="Company" context="{'group_by':'company_id'}"/></group>
             </search>
         </field>
     </record>

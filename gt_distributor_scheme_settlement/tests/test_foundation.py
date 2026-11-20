@@ -29,7 +29,7 @@ class TestDistributorSchemeFoundation(TransactionCase):
         })
         cls.distributor = cls.env["res.partner"].create({
             "name": "Scheme Test Distributor",
-            "is_company": True,
+            "company_type": "company",
         })
         cls.scheme = cls.env["gt.distributor.scheme"].create({
             "name": "Foundation Test Scheme",

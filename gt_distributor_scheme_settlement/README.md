@@ -22,7 +22,7 @@ Do not point this command at production or shared databases. The full P01 test r
 - **Distributor Scheme Manager** can configure schemes, slabs, and periods, and manage claims. Workflow state transitions and approval/fulfillment metadata remain server-blocked until their workflows are implemented.
 - **Distributor Scheme Auditor** has read-only access within allowed companies.
 
-Global company record rules scope every model to the user's allowed companies. Related models also enforce company consistency at ORM level. Audit and adjustment evidence cannot be updated or deleted through normal ORM calls. Odoo superuser mode bypasses ACLs and record rules by design; privileged custom code must preserve these invariants.
+Company scoped `ir.access` domain restrictions apply to every model (Odoo 20 combines permission and domain restrictions in this model). Related records also enforce company consistency at ORM level. Audit and adjustment evidence cannot be updated or deleted through normal ORM calls. Odoo superuser mode bypasses access controls by design; privileged custom code must preserve these invariants.
 
 ## Future business contracts (P02–P08)
 
