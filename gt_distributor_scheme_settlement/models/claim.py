@@ -469,7 +469,7 @@ class DistributorSchemeClaim(models.Model):
             "company_id": self.company_id.id,
             "scheme_id": self.scheme_id.id,
             "claim_id": self.id,
-            "event_type": "claim_source_revalidated",
+            "event_type": "post_approval_source_change_detected" if self.state == "approved" else "claim_source_revalidated",
             "evidence": {
                 "claim_id": self.id,
                 "claim_number": self.name,

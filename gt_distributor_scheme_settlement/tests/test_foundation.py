@@ -311,6 +311,35 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
                 "name": "Forged", "claim_id": claim.id, "revision_number": 99,
             })
 
+    def test_p05_revision_preparer_cannot_approve_own_revision(self):
+        claim = self._p05_reviewable_claim("P05-REVISION-SELF")
+        self._create_invoice_one_line(product_id=self.product_a, quantity=2,
+                                      invoice_date="2026-01-14", partner_id=self.distributor.id, post=True)
+        claim.with_user(self.manager).action_request_revision("Include newly posted invoice evidence.")
+        claim.with_user(self.manager).action_start_review()
+        with self.assertRaises(AccessError):
+            claim.with_user(self.manager).action_approve_claim()
+        self.assertEqual(claim.state, "under_review")
+        self.assertEqual(claim.active_revision_id.prepared_by_id, self.manager)
+
+    def test_p05_late_refund_after_approval_flags_claim_without_rewriting_freeze(self):
+        claim = self._p05_reviewable_claim("P05-LATE-REFUND")
+        original_approved_quantity = claim.reward_quantity
+        invoice = claim.source_ids.filtered(lambda line: line.source_role == "invoice").move_id
+        claim.with_user(self.independent_manager).action_approve_claim()
+        self._create_invoice_one_line(
+            move_type="out_refund", product_id=self.product_a, quantity=8,
+            invoice_date="2026-02-05", partner_id=self.distributor.id,
+            reversed_entry_id=invoice.id, post=True,
+        )
+        validation = claim.with_user(self.independent_manager).action_revalidate_sources()
+        self.assertEqual(validation["status"], "stale")
+        self.assertEqual(claim.state, "approved")
+        self.assertEqual(claim.source_validation_status, "stale")
+        self.assertEqual(claim.approved_reward_quantity, original_approved_quantity)
+        self.assertEqual(claim.approved_by_id, self.independent_manager)
+        self.assertEqual(claim._hash_snapshot(claim.approval_evidence), claim.approval_evidence_hash)
+
     def test_required_model_fields(self):
         required = {
             "gt.distributor.scheme": {"name", "code", "company_id", "qualifying_product_id", "reward_product_id", "distributor_ids", "date_start", "date_end", "qualifying_uom_id"},
@@ -318,6 +347,8 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
             "gt.distributor.scheme.period": {"scheme_id", "date_start", "date_end"},
             "gt.distributor.scheme.claim": {"scheme_id", "distributor_id", "period_id", "company_id", "entitlement_quantity", "approved_by_id", "approved_at", "fulfillment_order_id", "fulfillment_picking_ids"},
             "gt.distributor.scheme.claim.source": {"claim_id", "move_id", "invoice_line_id", "snapshot_payload"},
+            "gt.distributor.scheme.claim.revision": {"claim_id", "revision_number", "requested_by_id", "prepared_by_id", "source_fingerprint", "snapshot_hash"},
+            "gt.distributor.scheme.claim.decision.wizard": {"claim_id", "decision", "reason"},
             "gt.distributor.scheme.claim.adjustment": {"claim_id", "quantity_delta", "reason"},
             "gt.distributor.scheme.audit": {"company_id", "event_type", "actor_id", "event_date", "evidence"},
             "gt.distributor.scheme.preview.wizard": {"scheme_id", "distributor_id", "date_start", "date_end", "as_of", "calculation_status", "source_fingerprint"},
@@ -1089,7 +1120,8 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
             "view_distributor_scheme_slab_list", "view_distributor_scheme_slab_form",
             "view_distributor_scheme_period_list", "view_distributor_scheme_period_form",
             "view_distributor_scheme_claim_list", "view_distributor_scheme_claim_form",
-            "view_distributor_scheme_claim_search", "menu_distributor_scheme_root", "menu_distributor_schemes",
+            "view_distributor_scheme_claim_search", "view_distributor_scheme_claim_decision_wizard_form",
+            "menu_distributor_scheme_root", "menu_distributor_schemes",
             "menu_distributor_slabs", "menu_distributor_periods", "menu_distributor_claims", "menu_distributor_configuration",
         ]
         for xml_id in refs:
