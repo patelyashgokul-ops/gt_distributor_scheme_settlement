@@ -16,7 +16,7 @@ access_claim_operator,claim operator,gt.distributor.scheme.claim,gt_distributor_
 access_claim_manager,claim manager,gt.distributor.scheme.claim,gt_distributor_scheme_settlement.group_scheme_manager,crud,
 access_claim_auditor,claim auditor,gt.distributor.scheme.claim,gt_distributor_scheme_settlement.group_scheme_auditor,r,
 access_source_company,Claim source evidence: allowed companies,gt.distributor.scheme.claim.source,,r,"[('company_id', 'in', company_ids)]"
-access_source_operator,source operator,gt.distributor.scheme.claim.source,gt_distributor_scheme_settlement.group_scheme_operator,r,
+access_source_operator,source operator,gt.distributor.scheme.claim.source,gt_distributor_scheme_settlement.group_scheme_operator,cr,
 access_source_manager,source manager,gt.distributor.scheme.claim.source,gt_distributor_scheme_settlement.group_scheme_manager,cr,
 access_source_auditor,source auditor,gt.distributor.scheme.claim.source,gt_distributor_scheme_settlement.group_scheme_auditor,r,
 access_adjustment_company,Claim adjustments: allowed companies,gt.distributor.scheme.claim.adjustment,,r,"[('company_id', 'in', company_ids)]"
@@ -29,3 +29,9 @@ access_audit_manager,audit manager,gt.distributor.scheme.audit,gt_distributor_sc
 access_audit_auditor,audit auditor,gt.distributor.scheme.audit,gt_distributor_scheme_settlement.group_scheme_auditor,r,
 access_preview_operator,scheme preview operator,gt.distributor.scheme.preview.wizard,gt_distributor_scheme_settlement.group_scheme_operator,cru,
 access_preview_manager,scheme preview manager,gt.distributor.scheme.preview.wizard,gt_distributor_scheme_settlement.group_scheme_manager,cru,
+access_revision_company,Claim revisions: allowed companies,gt.distributor.scheme.claim.revision,,r,"[('company_id', 'in', company_ids)]"
+access_revision_operator,claim revision operator,gt.distributor.scheme.claim.revision,gt_distributor_scheme_settlement.group_scheme_operator,cru,
+access_revision_manager,claim revision manager,gt.distributor.scheme.claim.revision,gt_distributor_scheme_settlement.group_scheme_manager,cru,
+access_revision_auditor,claim revision auditor,gt.distributor.scheme.claim.revision,gt_distributor_scheme_settlement.group_scheme_auditor,r,
+access_decision_wizard_operator,claim decision wizard operator,gt.distributor.scheme.claim.decision.wizard,gt_distributor_scheme_settlement.group_scheme_operator,cru,
+access_decision_wizard_manager,claim decision wizard manager,gt.distributor.scheme.claim.decision.wizard,gt_distributor_scheme_settlement.group_scheme_manager,cru,

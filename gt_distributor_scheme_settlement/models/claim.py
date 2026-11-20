@@ -481,11 +481,390 @@ class DistributorSchemeClaim(models.Model):
             },
         })
 
+    def _active_validation(self):
+        self.ensure_one()
+        revision = self.approved_revision_id or (self.active_revision_id if self.active_revision_id.state == "proposed" else False)
+        if revision:
+            return self._compute_revision_revalidation(revision)
+        return self._compute_source_revalidation()
+
+    def _compute_revision_revalidation(self, revision):
+        self.ensure_one()
+        revision.ensure_one()
+        if revision.claim_id != self or revision._hash_payload(revision.snapshot_payload) != revision.snapshot_hash:
+            raise ValidationError(_("The proposed revision evidence failed its integrity check."))
+        result = self.env["gt.distributor.scheme.calculator"].calculate_eligibility(
+            self.scheme_id.id, self.distributor_id.id,
+            self.period_id.date_start, self.period_id.date_end, fields.Datetime.now(),
+        )
+        original = {
+            "gross_quantity": revision.gross_quantity,
+            "refund_quantity": revision.refund_quantity,
+            "net_quantity": revision.net_quantity,
+            "qualifying_uom_id": revision.qualifying_uom_id.id,
+            "slab_id": revision.slab_id.id,
+            "reward_product_id": revision.reward_product_id.id,
+            "reward_quantity": revision.reward_quantity,
+        }
+        current = self._result_entitlement(result)
+        if result["calculation_status"] == "BLOCKED":
+            status, category = "blocked", "source_attribution_unresolved"
+        else:
+            current_fingerprint = self._stable_source_fingerprint(self.scheme_id, self.period_id, self.distributor_id, result)
+            same_entitlement = (
+                original["reward_product_id"] == current["reward_product_id"]
+                and not float_compare(original["reward_quantity"], current["reward_quantity"], precision_digits=12)
+            )
+            status = "current" if current_fingerprint == revision.source_fingerprint and same_entitlement else "stale"
+            category = "none" if status == "current" else "source_changed_entitlement_unchanged" if same_entitlement else "source_changed_entitlement_changed"
+        return {
+            "status": status,
+            "change_category": category,
+            "original": original,
+            "current": current,
+            "source_fingerprint": False if result["calculation_status"] == "BLOCKED" else self._stable_source_fingerprint(self.scheme_id, self.period_id, self.distributor_id, result),
+            "calculation_fingerprint": result["source_fingerprint"],
+            "exception_codes": sorted({item["code"] for item in result["exceptions"]}),
+        }
+
+    def _approval_result_and_locks(self, expected_payload):
+        self.ensure_one()
+        result = self.env["gt.distributor.scheme.calculator"].calculate_eligibility(
+            self.scheme_id.id, self.distributor_id.id,
+            self.period_id.date_start, self.period_id.date_end, fields.Datetime.now(),
+        )
+        line_ids = {
+            row["invoice_line_id"]
+            for row in result["invoice_sources"] + result["refund_sources"]
+            if row["line_classification"] == "QUALIFYING"
+        }
+        move_ids = {
+            row["move_id"]
+            for row in result["invoice_sources"] + result["refund_sources"]
+            if row["line_classification"] == "QUALIFYING"
+        }
+        for row in expected_payload.get("sources", []):
+            if row.get("line_classification") == "QUALIFYING":
+                line_ids.add(row["invoice_line_id"])
+                move_ids.add(row["move_id"])
+        if move_ids:
+            self.env.cr.execute("SELECT id FROM account_move WHERE id = ANY(%s) ORDER BY id FOR SHARE", [sorted(move_ids)])
+        if line_ids:
+            self.env.cr.execute("SELECT id FROM account_move_line WHERE id = ANY(%s) ORDER BY id FOR SHARE", [sorted(line_ids)])
+        result = self.env["gt.distributor.scheme.calculator"].calculate_eligibility(
+            self.scheme_id.id, self.distributor_id.id,
+            self.period_id.date_start, self.period_id.date_end, fields.Datetime.now(),
+        )
+        return result
+
+    def _approval_blocked_action(self, validation):
+        if validation["status"] == "blocked":
+            message = _("Approval blocked: an accounting source exception requires review.")
+        elif validation["change_category"] == "source_changed_entitlement_unchanged":
+            message = _("Approval blocked: claim sources changed after calculation, even though the reward amount is unchanged.")
+        else:
+            message = _("Approval blocked: current accounting sources no longer support this entitlement.")
+        return {"type": "ir.actions.client", "tag": "display_notification", "params": {
+            "title": _("Claim approval blocked"), "message": message, "type": "warning", "sticky": True,
+        }}
+
+    def _request_revision_locked(self, reason):
+        self.ensure_one()
+        if not isinstance(reason, str) or len(reason.strip()) < 5:
+            raise ValidationError(_("Enter a revision reason of at least five characters."))
+        if self.state not in ("draft", "submitted", "under_review"):
+            raise UserError(_("Only an unapproved claim can be revised."))
+        if self.period_id.state != "closed":
+            raise UserError(_("A claim revision requires a closed scheme period."))
+        result = self.env["gt.distributor.scheme.calculator"].calculate_eligibility(
+            self.scheme_id.id, self.distributor_id.id,
+            self.period_id.date_start, self.period_id.date_end, fields.Datetime.now(),
+        )
+        if result["calculation_status"] != "ELIGIBLE":
+            validation = self._compute_source_revalidation()
+            self._store_revalidation(validation)
+            return self._blocked_action_message(validation)
+        if self.active_revision_id and self.active_revision_id.state == "proposed":
+            latest = self._compute_revision_revalidation(self.active_revision_id)
+            if latest["status"] == "current":
+                raise UserError(_("A current proposed revision already exists for this claim."))
+            self.active_revision_id.with_context(_gt_revision_write_token=REVISION_WRITE_TOKEN).write({"state": "superseded"})
+        stable_fingerprint = self._stable_source_fingerprint(self.scheme_id, self.period_id, self.distributor_id, result)
+        if stable_fingerprint == self.source_fingerprint and not self.active_revision_id:
+            raise UserError(_("The current accounting evidence matches the original claim; no revision is required."))
+        qualifying_rows = [
+            row for row in result["invoice_sources"] + result["refund_sources"]
+            if row["line_classification"] == "QUALIFYING"
+        ]
+        line_ids = sorted({row["invoice_line_id"] for row in qualifying_rows})
+        conflicts = self.env["gt.distributor.scheme.claim.source"].search([
+            ("invoice_line_id", "in", line_ids), ("claim_id", "!=", self.id),
+        ]) if line_ids else self.env["gt.distributor.scheme.claim.source"]
+        if conflicts:
+            raise UserError(_("A source line needed for the revision is already allocated to another claim."))
+        now = fields.Datetime.now()
+        snapshot, _fingerprint, snapshot_hash = self._build_snapshot(
+            self.scheme_id, self.period_id, self.distributor_id, result, now,
+        )
+        revision_model = self.env["gt.distributor.scheme.claim.revision"]
+        revision_number = max(self.revision_ids.mapped("revision_number") or [0]) + 1
+        revision = revision_model.with_context(_gt_revision_create_token=REVISION_CREATE_TOKEN).create({
+            "name": f"{self.name}-R{revision_number:03d}",
+            "claim_id": self.id,
+            "revision_number": revision_number,
+            "prior_revision_id": self.active_revision_id.id or (self.revision_ids[:1].id or False),
+            "requested_by_id": self.env.user.id,
+            "requested_at": now,
+            "prepared_by_id": self.env.user.id,
+            "prepared_at": now,
+            "reason": reason.strip(),
+            "source_validation_status": "current",
+            "calculation_cutoff": now,
+            "qualifying_product_id": self.scheme_id.qualifying_product_id.id,
+            "qualifying_uom_id": self.scheme_id.qualifying_uom_id.id,
+            "gross_quantity": result["gross_quantity"],
+            "refund_quantity": result["refund_quantity"],
+            "net_quantity": result["net_quantity"],
+            "slab_id": result["slab_id"],
+            "reward_product_id": result["reward_product_id"],
+            "reward_uom_id": self.scheme_id.reward_product_id.uom_id.id,
+            "reward_quantity": result["reward_quantity"],
+            "source_fingerprint": stable_fingerprint,
+            "calculation_fingerprint": result["source_fingerprint"],
+            "snapshot_payload": snapshot,
+            "snapshot_hash": snapshot_hash,
+        })
+        existing_ids = set(self.source_ids.mapped("invoice_line_id").ids)
+        extra_source_values = [
+            values for values in self._prepare_source_values(self, result, stable_fingerprint)
+            if values["invoice_line_id"] not in existing_ids
+        ]
+        for values in extra_source_values:
+            values["revision_id"] = revision.id
+        if extra_source_values:
+            self.env["gt.distributor.scheme.claim.source"].with_context(
+                _gt_claim_source_token=CLAIM_CREATE_TOKEN
+            ).create(extra_source_values)
+        self.with_context(_gt_claim_write_token=CLAIM_WRITE_TOKEN).write({
+            "active_revision_id": revision.id,
+            "state": "submitted",
+            "submitted_by_id": self.env.user.id,
+            "submitted_at": now,
+            "source_validation_status": "current",
+            "source_change_category": "none",
+            "source_validation_at": now,
+            "source_validation_result": {"status": "current", "revision_id": revision.id, "source_fingerprint": stable_fingerprint},
+        })
+        self.env["gt.distributor.scheme.audit"]._record_event({
+            "company_id": self.company_id.id, "scheme_id": self.scheme_id.id, "claim_id": self.id,
+            "event_type": "claim_revision_prepared",
+            "evidence": {"revision_id": revision.id, "revision_number": revision_number, "reason": reason.strip(), "source_fingerprint": stable_fingerprint, "snapshot_hash": snapshot_hash},
+        })
+        return {"type": "ir.actions.client", "tag": "display_notification", "params": {
+            "title": _("Revision prepared"), "message": _("A new entitlement revision is ready for independent review."),
+            "type": "success", "sticky": False,
+        }}
+
+    def action_request_revision(self, reason=None):
+        self.ensure_one()
+        self._check_action_access()
+        try:
+            with self.env.cr.savepoint():
+                self.env.cr.execute("SELECT id FROM gt_distributor_scheme_claim WHERE id = %s FOR UPDATE", [self.id])
+                self.invalidate_recordset()
+                return self._request_revision_locked(reason)
+        except Exception as error:
+            if error.__class__.__name__ == "SerializationFailure":
+                raise UserError(_("Another claim operation is in progress. Retry the revision request.")) from error
+            raise
+
+    def action_open_claim_decision_wizard(self):
+        self.ensure_one()
+        self._check_action_access()
+        return {
+            "type": "ir.actions.act_window",
+            "name": _("Claim Decision"),
+            "res_model": "gt.distributor.scheme.claim.decision.wizard",
+            "view_mode": "form",
+            "target": "new",
+            "context": {"default_claim_id": self.id, "default_decision": self.env.context.get("default_decision", "approve")},
+        }
+
+    def _reject_claim_locked(self, reason):
+        self.ensure_one()
+        if self.state != "under_review":
+            raise UserError(_("Only a claim Under Review can be rejected."))
+        if not isinstance(reason, str) or len(reason.strip()) < 5:
+            raise ValidationError(_("Enter a rejection reason of at least five characters."))
+        now = fields.Datetime.now()
+        if self.active_revision_id and self.active_revision_id.state == "proposed":
+            self.active_revision_id.with_context(_gt_revision_write_token=REVISION_WRITE_TOKEN).write({
+                "state": "rejected", "decision_by_id": self.env.user.id, "decision_at": now,
+            })
+        self.with_context(_gt_claim_write_token=CLAIM_WRITE_TOKEN).write({
+            "state": "rejected", "rejected_by_id": self.env.user.id, "rejected_at": now,
+            "rejection_reason": reason.strip(), "decision_note": reason.strip(),
+        })
+        self.env["gt.distributor.scheme.audit"]._record_event({
+            "company_id": self.company_id.id, "scheme_id": self.scheme_id.id, "claim_id": self.id,
+            "event_type": "claim_rejected",
+            "evidence": {"claim_id": self.id, "previous_state": "under_review", "new_state": "rejected", "reason": reason.strip(), "revision_id": self.active_revision_id.id or False},
+        })
+        return True
+
+    def action_reject_claim(self, reason=None):
+        self.ensure_one()
+        self._check_action_access(manager_only=True)
+        try:
+            with self.env.cr.savepoint():
+                self.env.cr.execute("SELECT id FROM gt_distributor_scheme_claim WHERE id = %s FOR UPDATE", [self.id])
+                self.invalidate_recordset()
+                return self._reject_claim_locked(reason)
+        except Exception as error:
+            if error.__class__.__name__ == "SerializationFailure":
+                raise UserError(_("Another decision is being recorded for this claim. Retry after it finishes.")) from error
+            raise
+
+    def _approve_claim_locked(self, decision_note=None):
+        self.ensure_one()
+        if self.state != "under_review":
+            raise UserError(_("Only a claim Under Review can be approved."))
+        if self.period_id.state != "closed" or self.scheme_id.state != "active" or self.period_id.scheme_id != self.scheme_id:
+            raise ValidationError(_("Approval requires the claim's active scheme and closed period."))
+        self._check_snapshot_integrity()
+        revision = self.active_revision_id
+        if revision and revision.state != "proposed":
+            raise UserError(_("The active claim revision is no longer pending approval."))
+        prohibited_users = {self.created_by_id.id, self.submitted_by_id.id}
+        if revision:
+            if revision._hash_payload(revision.snapshot_payload) != revision.snapshot_hash:
+                raise ValidationError(_("The proposed revision evidence failed its integrity check."))
+            prohibited_users.update((revision.requested_by_id.id, revision.prepared_by_id.id))
+        if not self.env.user.id or self.env.user.id in prohibited_users:
+            raise AccessError(_("Approval blocked: the claim creator, submitter, revision requester, or preparer cannot approve this entitlement."))
+        expected_fingerprint = revision.source_fingerprint if revision else self.source_fingerprint
+        expected_payload = revision.snapshot_payload if revision else self.snapshot_payload
+        result = self._approval_result_and_locks(expected_payload)
+        if result["calculation_status"] == "BLOCKED":
+            validation = {
+                "status": "blocked", "change_category": "source_attribution_unresolved",
+                "original": revision.snapshot_payload.get("calculation", {}) if revision else self._snapshot_entitlement(),
+                "current": self._result_entitlement(result), "source_fingerprint": False,
+                "exception_codes": sorted({item["code"] for item in result["exceptions"] if item["severity"] == "BLOCKING"}),
+            }
+        else:
+            current_fingerprint = self._stable_source_fingerprint(self.scheme_id, self.period_id, self.distributor_id, result)
+            expected_reward = revision.reward_quantity if revision else self.reward_quantity
+            expected_product = revision.reward_product_id.id if revision else self.reward_product_id.id
+            actual_product = result["reward_product_id"] if result["calculation_status"] == "ELIGIBLE" else False
+            actual_reward = result["reward_quantity"] if result["calculation_status"] == "ELIGIBLE" else 0
+            same_entitlement = (
+                actual_product == expected_product
+                and not float_compare(actual_reward, expected_reward, precision_digits=12)
+            )
+            is_current = result["calculation_status"] == "ELIGIBLE" and current_fingerprint == expected_fingerprint and same_entitlement
+            validation = {
+                "status": "current" if is_current else "stale",
+                "change_category": "none" if is_current else "source_changed_entitlement_unchanged" if same_entitlement else "source_changed_entitlement_changed",
+                "original": revision.snapshot_payload.get("calculation", {}) if revision else self._snapshot_entitlement(),
+                "current": self._result_entitlement(result),
+                "source_fingerprint": current_fingerprint,
+                "calculation_fingerprint": result["source_fingerprint"],
+                "exception_codes": sorted({item["code"] for item in result["exceptions"]}),
+            }
+        if validation["status"] != "current":
+            self._store_revalidation(validation)
+            if revision:
+                revision.with_context(_gt_revision_write_token=REVISION_WRITE_TOKEN).write({
+                    "source_validation_status": validation["status"], "source_validation_result": validation,
+                })
+            return self._approval_blocked_action(validation)
+        source_line_ids = sorted({
+            row["invoice_line_id"] for row in result["invoice_sources"] + result["refund_sources"]
+            if row["line_classification"] == "QUALIFYING"
+        })
+        other_allocations = self.env["gt.distributor.scheme.claim.source"].search([
+            ("invoice_line_id", "in", source_line_ids), ("claim_id", "!=", self.id),
+        ]) if source_line_ids else self.env["gt.distributor.scheme.claim.source"]
+        if other_allocations:
+            validation.update({"status": "blocked", "change_category": "source_attribution_unresolved", "exception_codes": ["SOURCE_ALREADY_ALLOCATED"]})
+            self._store_revalidation(validation)
+            return self._approval_blocked_action(validation)
+        now = fields.Datetime.now()
+        approved = {
+            "gross_quantity": revision.gross_quantity if revision else self.gross_quantity,
+            "refund_quantity": revision.refund_quantity if revision else self.refund_quantity,
+            "net_quantity": revision.net_quantity if revision else self.net_quantity,
+            "slab_id": revision.slab_id.id if revision else self.slab_id.id,
+            "reward_product_id": revision.reward_product_id.id if revision else self.reward_product_id.id,
+            "reward_uom_id": revision.reward_uom_id.id if revision else self.reward_uom_id.id,
+            "reward_quantity": revision.reward_quantity if revision else self.reward_quantity,
+        }
+        payload = {
+            "version": 1, "claim_id": self.id, "claim_number": self.name,
+            "revision_id": revision.id if revision else False,
+            "revision_number": revision.revision_number if revision else 0,
+            "company_id": self.company_id.id, "scheme_id": self.scheme_id.id,
+            "period_id": self.period_id.id, "distributor_id": self.distributor_id.id,
+            "source_fingerprint": expected_fingerprint,
+            "snapshot_fingerprint": revision.snapshot_hash if revision else self.snapshot_hash,
+            "gross_quantity": approved["gross_quantity"], "refund_quantity": approved["refund_quantity"],
+            "net_quantity": approved["net_quantity"], "slab_id": approved["slab_id"],
+            "reward_product_id": approved["reward_product_id"], "reward_uom_id": approved["reward_uom_id"],
+            "reward_quantity": approved["reward_quantity"], "approved_by_id": self.env.user.id,
+            "approved_at": fields.Datetime.to_string(now), "decision_note": (decision_note or "").strip(),
+        }
+        evidence_hash = self._hash_snapshot(payload)
+        self.with_context(_gt_claim_write_token=CLAIM_WRITE_TOKEN).write({
+            "state": "approved", "approved_by_id": self.env.user.id, "approved_at": now,
+            "approved_revision_id": revision.id or False,
+            "approved_gross_quantity": approved["gross_quantity"],
+            "approved_refund_quantity": approved["refund_quantity"],
+            "approved_net_quantity": approved["net_quantity"], "approved_slab_id": approved["slab_id"],
+            "approved_reward_product_id": approved["reward_product_id"],
+            "approved_reward_uom_id": approved["reward_uom_id"],
+            "approved_reward_quantity": approved["reward_quantity"],
+            "approved_source_fingerprint": expected_fingerprint,
+            "approved_snapshot_fingerprint": revision.snapshot_hash if revision else self.snapshot_hash,
+            "approval_evidence": payload, "approval_evidence_hash": evidence_hash,
+            "decision_note": (decision_note or "").strip(),
+            "source_validation_status": "current", "source_change_category": "none",
+            "source_validation_at": now, "source_validation_result": validation,
+        })
+        if revision:
+            revision.with_context(_gt_revision_write_token=REVISION_WRITE_TOKEN).write({
+                "state": "approved", "decision_by_id": self.env.user.id, "decision_at": now,
+            })
+        self.env["gt.distributor.scheme.audit"]._record_event({
+            "company_id": self.company_id.id, "scheme_id": self.scheme_id.id, "claim_id": self.id,
+            "event_type": "claim_approved",
+            "evidence": {"claim_id": self.id, "revision_id": revision.id or False, "previous_state": "under_review", "new_state": "approved", "source_fingerprint": expected_fingerprint, "snapshot_fingerprint": payload["snapshot_fingerprint"], "approval_evidence_hash": evidence_hash},
+        })
+        return True
+
+    def action_approve_claim(self, decision_note=None):
+        self.ensure_one()
+        self._check_action_access(manager_only=True)
+        try:
+            with self.env.cr.savepoint():
+                self.env.cr.execute("SELECT id FROM gt_distributor_scheme_claim WHERE id = %s FOR UPDATE", [self.id])
+                self.invalidate_recordset()
+                return self._approve_claim_locked(decision_note)
+        except Exception as error:
+            if error.__class__.__name__ == "SerializationFailure":
+                raise UserError(_("Claim approval conflicted with another claim or accounting update. No approval was committed; retry after review.")) from error
+            raise
+
     def action_revalidate_sources(self):
         self.ensure_one()
         self._check_action_access()
-        validation = self._compute_source_revalidation()
+        validation = self._active_validation()
         self._store_revalidation(validation)
+        if self.active_revision_id and self.active_revision_id.state == "proposed":
+            self.active_revision_id.with_context(_gt_revision_write_token=REVISION_WRITE_TOKEN).write({
+                "source_validation_status": validation["status"],
+                "source_validation_result": validation,
+            })
         return validation
 
     def action_submit(self):
@@ -497,7 +876,7 @@ class DistributorSchemeClaim(models.Model):
             raise UserError(_("Only a Draft claim can be submitted."))
         if self.period_id.state != "closed":
             raise UserError(_("Claims can be submitted only after their period is closed."))
-        validation = self._compute_source_revalidation()
+        validation = self._active_validation()
         if validation["status"] != "current":
             self._store_revalidation(validation)
             return self._blocked_action_message(validation)
@@ -526,7 +905,7 @@ class DistributorSchemeClaim(models.Model):
         self.invalidate_recordset()
         if self.state != "submitted":
             raise UserError(_("Only a Submitted claim can enter review."))
-        validation = self._compute_source_revalidation()
+        validation = self._active_validation()
         if validation["status"] != "current":
             self._store_revalidation(validation)
             return self._blocked_action_message(validation)
