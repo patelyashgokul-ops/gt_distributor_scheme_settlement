@@ -173,6 +173,8 @@
                                     <field name="approved_revision_id"/>
                                 </group>
                                 <group string="Frozen Entitlement">
+                                    <field name="approved_qualifying_product_id"/>
+                                    <field name="approved_qualifying_uom_id"/>
                                     <field name="approved_gross_quantity"/>
                                     <field name="approved_refund_quantity"/>
                                     <field name="approved_net_quantity"/>

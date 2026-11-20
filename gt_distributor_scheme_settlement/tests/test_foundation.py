@@ -173,6 +173,8 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
         self.assertTrue(claim.with_user(self.independent_manager).action_approve_claim("Verified against posted sources."))
         self.assertEqual(claim.state, "approved")
         self.assertEqual(claim.approved_by_id, self.independent_manager)
+        self.assertEqual(claim.approved_qualifying_product_id, claim.qualifying_product_id)
+        self.assertEqual(claim.approved_qualifying_uom_id, claim.qualifying_uom_id)
         self.assertEqual(claim.approved_net_quantity, 10)
         self.assertEqual(claim.approved_reward_quantity, claim.reward_quantity)
         self.assertEqual(claim.approved_snapshot_fingerprint, claim.snapshot_hash)

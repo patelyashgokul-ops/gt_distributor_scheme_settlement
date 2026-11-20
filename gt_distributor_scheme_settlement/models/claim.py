@@ -62,6 +62,8 @@ class DistributorSchemeClaim(models.Model):
     approved_gross_quantity = fields.Float(readonly=True, copy=False, digits="Product Unit of Measure")
     approved_refund_quantity = fields.Float(readonly=True, copy=False, digits="Product Unit of Measure")
     approved_net_quantity = fields.Float(readonly=True, copy=False, digits="Product Unit of Measure")
+    approved_qualifying_product_id = fields.Many2one("product.product", readonly=True, copy=False, check_company=True)
+    approved_qualifying_uom_id = fields.Many2one("uom.uom", readonly=True, copy=False)
     approved_slab_id = fields.Many2one("gt.distributor.scheme.slab", readonly=True, copy=False, ondelete="restrict")
     approved_reward_product_id = fields.Many2one("product.product", readonly=True, copy=False, check_company=True)
     approved_reward_uom_id = fields.Many2one("uom.uom", readonly=True, copy=False)
@@ -121,7 +123,8 @@ class DistributorSchemeClaim(models.Model):
         "source_validation_at", "source_validation_result", "state", "approved_by_id",
         "approved_at", "active_revision_id", "revision_ids", "decision_note", "rejected_by_id",
         "rejected_at", "rejection_reason", "approved_revision_id", "approved_gross_quantity",
-        "approved_refund_quantity", "approved_net_quantity", "approved_slab_id",
+        "approved_refund_quantity", "approved_net_quantity", "approved_qualifying_product_id",
+        "approved_qualifying_uom_id", "approved_slab_id",
         "approved_reward_product_id", "approved_reward_uom_id", "approved_reward_quantity",
         "approved_source_fingerprint", "approved_snapshot_fingerprint", "approval_evidence",
         "approval_evidence_hash", "fulfillment_order_id", "fulfillment_picking_ids", "source_ids",
@@ -195,19 +198,54 @@ class DistributorSchemeClaim(models.Model):
             if rec.approved_revision_id and rec.approved_revision_id.claim_id != rec:
                 raise ValidationError(_("The approved revision must belong to this logical claim."))
 
-    @api.constrains("state", "approved_by_id", "approved_at", "approved_reward_quantity", "approval_evidence", "approval_evidence_hash", "approved_revision_id")
+    @api.constrains(
+        "state", "approved_by_id", "approved_at", "approved_gross_quantity", "approved_refund_quantity",
+        "approved_net_quantity", "approved_qualifying_product_id", "approved_qualifying_uom_id",
+        "approved_slab_id", "approved_reward_product_id", "approved_reward_uom_id",
+        "approved_reward_quantity", "approved_source_fingerprint", "approved_snapshot_fingerprint",
+        "approval_evidence", "approval_evidence_hash", "approved_revision_id", "snapshot_hash",
+        "source_fingerprint", "gross_quantity", "refund_quantity", "net_quantity", "slab_id",
+        "reward_product_id", "reward_uom_id", "reward_quantity",
+    )
     def _check_approval_evidence(self):
         for claim in self:
             if claim.state == "approved":
                 if not all((claim.approved_by_id, claim.approved_at, claim.approved_reward_quantity > 0,
+                            claim.approved_qualifying_product_id, claim.approved_qualifying_uom_id,
                             claim.approved_reward_product_id, claim.approved_reward_uom_id,
                             claim.approved_source_fingerprint, claim.approved_snapshot_fingerprint,
                             claim.approval_evidence, claim.approval_evidence_hash)):
                     raise ValidationError(_("An approved claim must have a complete frozen approval evidence record."))
+                if claim.rejected_by_id or claim.rejected_at or claim.rejection_reason:
+                    raise ValidationError(_("An approved claim cannot carry rejection metadata."))
                 if claim._hash_snapshot(claim.approval_evidence) != claim.approval_evidence_hash:
                     raise ValidationError(_("Approval evidence integrity verification failed."))
+                source = claim.approved_revision_id or claim
+                if claim.approved_source_fingerprint != source.source_fingerprint:
+                    raise ValidationError(_("The frozen source fingerprint must match the approved claim revision."))
+                if claim.approved_snapshot_fingerprint != (source.snapshot_hash if claim.approved_revision_id else claim.snapshot_hash):
+                    raise ValidationError(_("The frozen snapshot fingerprint must match the approved calculation snapshot."))
+                for frozen, expected in (
+                    (claim.approved_gross_quantity, source.gross_quantity),
+                    (claim.approved_refund_quantity, source.refund_quantity),
+                    (claim.approved_net_quantity, source.net_quantity),
+                    (claim.approved_reward_quantity, source.reward_quantity),
+                ):
+                    if float_compare(frozen, expected, precision_digits=12):
+                        raise ValidationError(_("Frozen approved quantities must match the approved calculation."))
+                if (claim.approved_qualifying_product_id != source.qualifying_product_id
+                        or claim.approved_qualifying_uom_id != source.qualifying_uom_id
+                        or claim.approved_slab_id != source.slab_id
+                        or claim.approved_reward_product_id != source.reward_product_id
+                        or claim.approved_reward_uom_id != source.reward_uom_id):
+                    raise ValidationError(_("Frozen approved products, units, and slab must match the approved calculation."))
             elif claim.approved_by_id or claim.approved_at or claim.approval_evidence_hash:
                 raise ValidationError(_("Approval metadata is valid only for an approved claim."))
+            if claim.state == "rejected":
+                if not claim.rejected_by_id or not claim.rejected_at or not claim.rejection_reason:
+                    raise ValidationError(_("A rejected claim must preserve its reviewer, date, and reason."))
+            elif claim.rejected_by_id or claim.rejected_at or claim.rejection_reason:
+                raise ValidationError(_("Rejection metadata is valid only for a rejected claim."))
 
     @api.model
     def _canonical_value(self, value):
@@ -796,6 +834,8 @@ class DistributorSchemeClaim(models.Model):
             return self._approval_blocked_action(validation)
         now = fields.Datetime.now()
         approved = {
+            "qualifying_product_id": revision.qualifying_product_id.id if revision else self.qualifying_product_id.id,
+            "qualifying_uom_id": revision.qualifying_uom_id.id if revision else self.qualifying_uom_id.id,
             "gross_quantity": revision.gross_quantity if revision else self.gross_quantity,
             "refund_quantity": revision.refund_quantity if revision else self.refund_quantity,
             "net_quantity": revision.net_quantity if revision else self.net_quantity,
@@ -812,6 +852,8 @@ class DistributorSchemeClaim(models.Model):
             "period_id": self.period_id.id, "distributor_id": self.distributor_id.id,
             "source_fingerprint": expected_fingerprint,
             "snapshot_fingerprint": revision.snapshot_hash if revision else self.snapshot_hash,
+            "qualifying_product_id": approved["qualifying_product_id"],
+            "qualifying_uom_id": approved["qualifying_uom_id"],
             "gross_quantity": approved["gross_quantity"], "refund_quantity": approved["refund_quantity"],
             "net_quantity": approved["net_quantity"], "slab_id": approved["slab_id"],
             "reward_product_id": approved["reward_product_id"], "reward_uom_id": approved["reward_uom_id"],
@@ -825,6 +867,8 @@ class DistributorSchemeClaim(models.Model):
             "approved_gross_quantity": approved["gross_quantity"],
             "approved_refund_quantity": approved["refund_quantity"],
             "approved_net_quantity": approved["net_quantity"], "approved_slab_id": approved["slab_id"],
+            "approved_qualifying_product_id": approved["qualifying_product_id"],
+            "approved_qualifying_uom_id": approved["qualifying_uom_id"],
             "approved_reward_product_id": approved["reward_product_id"],
             "approved_reward_uom_id": approved["reward_uom_id"],
             "approved_reward_quantity": approved["reward_quantity"],
