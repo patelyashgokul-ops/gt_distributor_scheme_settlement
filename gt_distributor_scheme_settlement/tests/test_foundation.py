@@ -29,7 +29,7 @@ class TestDistributorSchemeFoundation(TransactionCase):
         })
         cls.distributor = cls.env["res.partner"].create({
             "name": "Scheme Test Distributor",
-            "company_type": "company",
+            "vat": "P01TESTVAT",
         })
         cls.scheme = cls.env["gt.distributor.scheme"].create({
             "name": "Foundation Test Scheme",
@@ -47,7 +47,7 @@ class TestDistributorSchemeFoundation(TransactionCase):
             "login": "scheme-foundation-operator",
             "company_id": cls.company_a.id,
             "company_ids": [(6, 0, [cls.company_a.id])],
-            "groups_id": [(6, 0, [
+            "group_ids": [(6, 0, [
                 cls.env.ref("base.group_user").id,
                 cls.env.ref("gt_distributor_scheme_settlement.group_scheme_operator").id,
             ])],
@@ -57,7 +57,7 @@ class TestDistributorSchemeFoundation(TransactionCase):
             "login": "scheme-foundation-manager",
             "company_id": cls.company_a.id,
             "company_ids": [(6, 0, [cls.company_a.id])],
-            "groups_id": [(6, 0, [
+            "group_ids": [(6, 0, [
                 cls.env.ref("base.group_user").id,
                 cls.env.ref("gt_distributor_scheme_settlement.group_scheme_manager").id,
             ])],
@@ -67,7 +67,7 @@ class TestDistributorSchemeFoundation(TransactionCase):
             "login": "scheme-foundation-unassigned",
             "company_id": cls.company_a.id,
             "company_ids": [(6, 0, [cls.company_a.id])],
-            "groups_id": [(6, 0, [cls.env.ref("base.group_user").id])],
+            "group_ids": [(6, 0, [cls.env.ref("base.group_user").id])],
         })
 
     def test_required_model_fields(self):
