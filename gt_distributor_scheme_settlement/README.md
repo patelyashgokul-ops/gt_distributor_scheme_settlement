@@ -2,7 +2,7 @@
 
 Odoo 20 Community addon by Golok Technology. Support: patelyash.gokul@gmail.com.
 
-This P01 foundation stores distributor schemes, purchase slabs, calculation periods, claims, evidence, adjustments, and append-only audit records. It does not calculate purchases or rewards, transition workflows, approve claims, create sales orders, reconcile deliveries, or settle claims. Draft records are configuration and evidence containers only.
+The P01 foundation stores schemes, purchase slabs, periods, claims, source evidence, adjustments, and append-only audit records. P02 adds a permission-checked, non-persisted purchase calculation from posted invoices and linked refunds, including UoM conversion and highest-slab selection. It does not create claims, transition workflows, approve claims, create sales orders, reconcile deliveries, or settle claims.
 
 ## Installation
 
@@ -11,10 +11,10 @@ Copy this directory into an Odoo 20 Community addons path, update the Apps list,
 The inspected Odoo 20 checkout declares Python 3.12–3.13 and PostgreSQL 16 minimum. Use a supported Python runtime and a disposable PostgreSQL database for automated tests. Run:
 
 ```powershell
-python odoo-bin --addons-path="<odoo-addons>,<custom-addons>" --data-dir="<disposable-data-dir>" --db_host=127.0.0.1 --db_port=<disposable-port> --db_user=<test-user> --db_password=<test-password> --database=gt_scheme_p01_test --init=gt_distributor_scheme_settlement --test-tags=/gt_distributor_scheme_settlement --stop-after-init --without-demo
+python odoo-bin --addons-path="<odoo-addons>,<custom-addons>" --data-dir="<disposable-data-dir>" --db_host=127.0.0.1 --db_port=<disposable-port> --db_user=<test-user> --db_password=<test-password> --database=gt_scheme_p02_test --init=gt_distributor_scheme_settlement --test-tags=/gt_distributor_scheme_settlement --stop-after-init --without-demo
 ```
 
-Do not point this command at production or shared databases. The full P01 test report and environment limitations are in `TEST_REPORT.md`.
+Do not point this command at production or shared databases. P01 and P02 test evidence and environment limitations are in `TEST_REPORT.md`.
 
 ## Security roles
 
@@ -24,11 +24,11 @@ Do not point this command at production or shared databases. The full P01 test r
 
 Company scoped `ir.access` domain restrictions apply to every model (Odoo 20 combines permission and domain restrictions in this model). Related records also enforce company consistency at ORM level. Audit and adjustment evidence cannot be updated or deleted through normal ORM calls. Odoo superuser mode bypasses access controls by design; privileged custom code must preserve these invariants.
 
-## Future business contracts (P02–P08)
+## Remaining business contracts (P03–P08)
 
 These are design contracts, not implemented behavior. Future services must expose explicit success/failure results and be safe under direct ORM/RPC/import and concurrent invocation.
 
-1. **Eligibility and source evidence:** only brand-side customer invoices in `account.move` with customer-invoice type and posted state qualify. Use invoice lines and linked posted refunds/credit notes to derive net eligible purchases. A refund must reference its originating invoice where the accounting data supports that link; unlinked or ambiguous returns are exceptions for review. Never treat draft/cancelled documents as purchases.
+1. **Eligibility and source evidence:** P02's calculator selects only same-company, same-distributor `out_invoice` and `out_refund` documents in `posted` state and within the requested period. It filters to the scheme qualifying product. Draft/cancelled documents are excluded. Unlinked refunds and refunds linked outside the period's eligible invoices raise review exceptions. Immutable persisted source snapshots remain future work.
 2. **Ownership and scope:** each claim is for exactly one scheme, scheme-specific period, distributor, and company. Every source invoice, refund, line, claim, adjustment, and fulfillment record must match that company and distributor. Reject cross-company, cross-distributor, out-of-period, or otherwise stale evidence.
 3. **Quantity policy:** convert invoice quantities into the scheme qualifying UoM using Odoo's UoM conversion API and compatible UoM category. Reject incompatible categories; do not compare raw quantities across units.
 4. **Slab policy:** apply only the single highest qualifying slab. A slab's minimum is inclusive and its optional upper boundary is exclusive. Overlapping slabs are invalid. Do not cumulate rewards from multiple slabs.
