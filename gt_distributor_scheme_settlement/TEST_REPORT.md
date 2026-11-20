@@ -165,3 +165,53 @@ Final successful command (PowerShell; disposable database and isolated local Pos
 - P07: reporting and premium dashboard.
 - P08: packaging, documentation polish, supported-runtime verification, and publication readiness review.
 - This work does not make the application ready to publish.
+
+## P05 review, approval, rejection, and revision
+
+### Implementation
+
+- Extended the claim form/list with manager-only review, approve, and reject actions, operator/manager revision request, source validation status, frozen entitlement values, approval/rejection identity, approval evidence hash, and revision history. A native decision wizard collects an optional approval note and mandatory rejection/revision reason.
+- Approval only accepts an Under Review claim. Inside one transaction it authenticates the manager and allowed company, locks the claim, verifies the original snapshot and any proposed revision, rejects creator/submitter/revision requester/preparer identities (including historical actors retained in revision rows and committed audit events), locks all visible source moves/lines in stable order, recalculates P03 eligibility, compares deterministic source fingerprints and reward values, checks allocation conflicts, writes frozen approval evidence, advances revision and claim states, and appends audit evidence.
+- Stale and blocked approvals persist validation status and return a warning without approving. A source change remains blocking even if reward quantity is unchanged. Existing approval values are not rewritten when later source revalidation marks a claim stale.
+- Rejection requires a reason and captures actor/time. It preserves the claim snapshot and source allocation, does not release the source, create a second claim, or post accounting/stock records.
+- Added `gt.distributor.scheme.claim.revision`. A controlled request stores the new calculation snapshot, requester/preparer, revision number, source fingerprint, and reason while retaining the original P04 snapshot. New qualifying lines are appended to the logical claim's globally unique source allocation rows; old lines are never released. One pending revision is referenced by the locked logical claim. Revisions are immutable through ordinary create/write/unlink APIs and retain historical states.
+- Approval freezes qualifying product/UoM, gross/refund/net quantities, slab, reward product/UoM/quantity, source fingerprint, snapshot fingerprint, approver identity/time, revision identity, and decision note. A canonical SHA-256 approval evidence hash is verified by model constraints. The application's ORM protection does not prevent privileged database tampering.
+- No sales order, stock picking, inventory operation, or accounting entry is created by approval or rejection.
+- Bumped module version to `20.0.5.0.0`. P01-P04 models, calculation, close, snapshot, source allocation, and security were retained and regression-tested.
+
+### P05 execution evidence
+
+| Check | Result | Evidence |
+|---|---|---|
+| Python syntax / XML parsing | PASS | Final static run parsed 18 addon Python files and 9 XML files after schema/view additions. |
+| Odoo module update, registry, ACLs, revision model, decision wizard/views | PASS (unsupported interpreter) | Disposable Odoo database `gt_scheme_p04_test`; addon update loaded new revision model, transient wizard, ACLs, constraints, and native forms. |
+| P01-P04 regressions plus P05 ORM suite | PASS (unsupported interpreter) | Final run: 59 post-tests, 0 failures, 0 errors; Odoo test stats 61 tests and 15,504 queries. `.test/odoo-p05-final.log`. Includes P01-P04 calculations/close/snapshots plus P05 approval, rejection, revision, stale evidence, self-approval, direct write, and real Company B user isolation cases. |
+| Manager approval and frozen decision evidence | PASS (unsupported interpreter) | Real posted invoice and claim ORM fixture. Approval stores the authenticated manager identity, matching frozen values/fingerprints, and one audit event; no sale, picking, or accounting record count changes. |
+| Self-approval and direct bypass protection | PASS (unsupported interpreter) | Tests reject claim creator, submitter, and revision preparer; direct approved-state/identity/quantity/hash writes, forged claim creation, revision writes, copy, and deletion are rejected. |
+| Rejection and revisions | PASS (unsupported interpreter) | Rejection reason is mandatory; historical snapshot remains unchanged. Revision test stores an updated source calculation as revision 1, retains the original snapshot and source allocation, requires independent approval, and freezes the revised quantity. |
+| Late/post-approval source change | PASS (unsupported interpreter) | A linked late refund marks an already-approved claim stale while its approved quantity, approver, and evidence hash remain unchanged. |
+| Company A/B approval isolation | PASS (unsupported interpreter) | A real Company B scheme, invoice, closed period, submitted claim, and reviewer were created. Company A manager search returns no claim and direct approval is denied. `.test/odoo-p05-company.log` also records the targeted one-test pass. |
+| Concurrent approvals | PASS (unsupported interpreter) | `.test/p05_concurrency_probe.py` used independent Odoo registry cursors. Two managers approving one claim produced exactly one approval audit and frozen entitlement; the other received a safe conflict. Concurrent approve-vs-reject also committed exactly one decision and one matching audit event. Output evidence: `.test/p05-concurrency-results.txt`. |
+| Concurrent revision requests | NOT RUN | Claim row locking and one active-revision pointer serialize requests, but independent-cursor revision-request concurrency was not separately exercised. |
+| Accounting source changed during approval commit | NOT RUN | Approval locks existing contributing move/line rows and catches row-update serialization conflicts. A new backdated invoice inserted after the transaction snapshot is not separately tested during approval; it will be surfaced by later source revalidation before fulfillment. No claim is made that the Odoo Repeatable Read snapshot reconstructs later inserts. |
+| Odoo-supported Python 3.12/3.13 | NOT RUN | Only Python 3.14.6 is available in the environment; Odoo 20 declares 3.12–3.13 support. |
+
+Final addon test command (PowerShell; disposable PostgreSQL 18 cluster/database):
+
+```powershell
+& C:\PycharmProjects\odoo20\.venv\Scripts\python.exe C:\PycharmProjects\odoo20\odoo-20.0\odoo-bin --addons-path=C:\PycharmProjects\odoo20\odoo-20.0\odoo\addons,C:\PycharmProjects\odoo20\custom_addons --data-dir=C:\PycharmProjects\odoo20\custom_addons\gt_distributor_scheme_settlement\.test\odoo-data --db_host=127.0.0.1 --db_port=55498 --db_user=odoo_test --db_password= --database=gt_scheme_p04_test --update=gt_distributor_scheme_settlement --without-demo --test-enable --test-tags=/gt_distributor_scheme_settlement --stop-after-init --http-port=8095 --logfile=C:\PycharmProjects\odoo20\custom_addons\gt_distributor_scheme_settlement\.test\odoo-p05-final.log
+```
+
+### P05 acceptance matrix
+
+- **AC-22 manager-only approval: PASS.** Manager/company authorization, Under Review state, current source revalidation, positive frozen entitlement, audit, and Company A/B denial were exercised.
+- **AC-23 self-approval prevention: PASS.** Creator, submitter, current/historical revision requester and preparer identities are checked server-side; manager membership alone does not bypass this rule.
+- **AC-24 ORM/RPC/import protection: PASS for tested API surfaces.** Direct state/approval value writes, forged create, source/revision mutation, copying and deletion fail; public methods enforce identity, state, group, and company rules. Full import-vector and read_group/search_read disclosure fuzzing were not run.
+
+### Remaining P06-P08 work and risks
+
+- P06: approved-entitlement single-use zero-price sale orders, stock picking and actual delivery reconciliation, partial deliveries, outstanding quantity, and post-approval refund adjustment/fulfillment holds.
+- P07: reports and premium dashboard.
+- P08: supported Python runtime validation, full packaging, documentation and release checks.
+- Approval and rejection races are tested with independent transactions. Concurrent revision requests and a new invoice insert racing inside the approval snapshot remain unverified. Revalidation must be repeated immediately before P06 fulfillment; approved quantity remains frozen and is never silently adjusted.
+- The environment's Python 3.14.6 remains outside Odoo 20's declared support range. This P05 work does not make the product ready to publish.

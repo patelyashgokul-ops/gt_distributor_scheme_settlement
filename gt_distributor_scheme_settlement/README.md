@@ -32,10 +32,10 @@ The preview reads posted customer invoices and linked posted customer credit not
 
 ## Remaining business contracts (P06–P08)
 
-These are design contracts, not implemented behavior. Future services must expose explicit success/failure results and be safe under direct ORM/RPC/import and concurrent invocation.
+The remaining items are P06–P08 work and are not implemented behavior. Future services must expose explicit success/failure results and be safe under direct ORM/RPC/import and concurrent invocation.
 
 1. **Ownership and scope:** each claim is for exactly one scheme, scheme-specific period, distributor, and company. Every source invoice, refund, line, claim, adjustment, and fulfillment record must match that company and distributor. Reject cross-company, cross-distributor, out-of-period, or otherwise stale evidence.
-2. **Period and claim policy:** P04 closes periods atomically and idempotently and creates at most one claim per scheme, company, distributor, and period. It persists calculation/source snapshots. True concurrent close and cross-scheme allocation races still need independent-cursor tests.
+2. **Period and claim policy:** P04 closes periods atomically and idempotently and creates at most one claim per scheme, company, distributor, and period. It persists calculation/source snapshots. Same-period close and cross-scheme source-allocation races passed independent-cursor tests.
 3. **Evidence immutability and adjustments:** P04 protects claim and source snapshots through ORM guards and hashes; database administrators remain outside this application-level guarantee. Corrections append adjustment records; they never rewrite or erase source evidence. Late returns after period close need the P06 adjustment workflow.
 4. **Stale claim and approval controls:** P04 compares current source state to its snapshot. P05 blocks stale approval, enforces manager authorization and separation of duties, freezes the approved entitlement, and stores controlled revisions without replacing the original snapshot.
 5. **Free-goods fulfillment:** fulfillment creates a sales order for the reward product at zero price, with explicit company, distributor, and claim links. Enforce an idempotency key/unique claim link so fulfilled free goods cannot be issued twice. Reconcile fulfillment against actual completed delivery quantities from stock pickings; an order alone is not delivery.
