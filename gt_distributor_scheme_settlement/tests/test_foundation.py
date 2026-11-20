@@ -1493,6 +1493,8 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
             "menu_distributor_slabs", "menu_distributor_periods", "menu_distributor_claims", "menu_distributor_configuration",
             "view_scheme_dashboard_form", "view_scheme_report_wizard_form", "menu_distributor_scheme_dashboard",
             "menu_distributor_reporting", "menu_distributor_settlement_report",
+            "view_distributor_scheme_audit_list", "view_distributor_scheme_audit_search",
+            "menu_distributor_audit_history",
         ]
         for xml_id in refs:
             self.assertTrue(self.env.ref(f"gt_distributor_scheme_settlement.{xml_id}"), xml_id)
@@ -1563,6 +1565,14 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
         self.assertTrue(all(cell.data_type != "f" for row in sheet.iter_rows() for cell in row))
         self.assertTrue(any(str(cell.value).startswith("'\t=HYPERLINK") for row in sheet.iter_rows() for cell in row if cell.value))
         self.distributor.name = original_name
+
+    def test_p07_formula_neutralization_handles_prefixes_controls_and_unicode(self):
+        from ..models.reporting import _spreadsheet_safe_text
+
+        for value in ("=SUM(1,1)", "+1+2", "-1+2", "@SUM(1,1)", " \t=1+1", "\r\n+CMD", "\ufeff@SUM(1,1)"):
+            self.assertTrue(_spreadsheet_safe_text(value).startswith("'"), value)
+        self.assertEqual(_spreadsheet_safe_text("ગુજરાતી Distributor"), "ગુજરાતી Distributor")
+        self.assertEqual(_spreadsheet_safe_text(None), "")
 
     def test_p07_report_company_scope_rejects_arbitrary_company_filter(self):
         wizard = self.env["gt.distributor.scheme.report.wizard"].with_user(self.operator).create({

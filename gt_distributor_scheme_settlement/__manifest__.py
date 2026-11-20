@@ -21,6 +21,7 @@
         "views/eligibility_preview_views.xml",
         "views/fulfillment_views.xml",
         "views/reporting_views.xml",
+        "views/audit_views.xml",
         "views/menus.xml",
     ],
     "installable": True,
