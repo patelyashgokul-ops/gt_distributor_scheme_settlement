@@ -201,7 +201,7 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
         self.assertEqual(len(result["refund_lines"]), 1)
         self.assertEqual(result["refund_lines"][0]["reversed_entry_id"], invoice.id)
 
-    def test_unlinked_late_refund_is_rejected_for_review(self):
+    def test_linked_out_of_period_refund_is_rejected_for_review(self):
         self.scheme.write({"qualifying_uom_id": self.uom_dozen.id})
         period = self.env["gt.distributor.scheme.period"].create({
             "name": "January 2026 Refund Review",

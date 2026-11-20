@@ -44,7 +44,7 @@ Final P02 command (PowerShell; isolated cluster and database only):
 & C:\PycharmProjects\odoo20\.venv\Scripts\python.exe C:\PycharmProjects\odoo20\odoo-20.0\odoo-bin --addons-path=C:\PycharmProjects\odoo20\odoo-20.0\odoo\addons,C:\PycharmProjects\odoo20\custom_addons --data-dir=C:\PycharmProjects\odoo20\custom_addons\gt_distributor_scheme_settlement\.test\odoo-data --db_host=127.0.0.1 --db_port=55498 --db_user=odoo_test --db_password=odoo_test --database=gt_scheme_p02_test --update=gt_distributor_scheme_settlement --without-demo=all --test-enable --test-tags=/gt_distributor_scheme_settlement --stop-after-init --http-port=8095 --logfile=C:\PycharmProjects\odoo20\custom_addons\gt_distributor_scheme_settlement\.test\odoo-p02-rerun.log
 ```
 
-Odoo reported `0 failed, 0 error(s) of 11 tests` in `.test/odoo-p02-rerun.log`. The database and filestore are under `.test`; the temporary PostgreSQL cluster was stopped after verification.
+Odoo reported `0 failed, 0 error(s) of 11 tests` in `.test/odoo-p02-rerun.log`. The disposable database, filestore, and temporary PostgreSQL cluster were removed/stopped after verification; logs remain under `.test`.
 
 ## Acceptance checks
 
@@ -53,11 +53,11 @@ Odoo reported `0 failed, 0 error(s) of 11 tests` in `.test/odoo-p02-rerun.log`. 
 - **AC-03 company isolation and authorization:** PASS (Python 3.14.6 unsupported) — ACLs, Odoo 20 company-scoped `ir.access` domains, and cross-company checks covered by addon tests.
 - **AC-04 immutable audit/evidence:** PASS (Python 3.14.6 unsupported) — audit modification restrictions covered by tests; source and adjustment evidence are append-only at ORM level.
 - **AC-05 native views and menu references:** PASS (Python 3.14.6 unsupported) — Odoo view schemas and menu/action references loaded successfully; test verifies key external IDs.
-- **AC-06 no unimplemented workflow claims:** PASS — no calculate, approve, close, fulfill, or settle actions/services are exposed; claim lifecycle and metadata writes are server-blocked.
+- **AC-06 no unimplemented workflow claims:** PASS - no calculation action is exposed in the UI; the P02 calculator is a permission-checked, non-persisting service only. No claim-close, approval, fulfillment, or settlement operation is exposed; claim lifecycle and metadata writes remain server-blocked.
 
 ## Security limitations and deferred work
 
 - Odoo superuser mode intentionally bypasses access controls. Future privileged services need their own explicit authorization and invariant checks.
 - Full multi-company access combinations, import/RPC vectors, and concurrent attempts still require targeted runtime tests. Tests used the discovered unsupported Python 3.14.6 runtime. A broad Odoo core test run also hit an unrelated core attachment memory assertion, so the successful run was filtered to this addon.
-- Purchase calculation, refund linkage, UoM conversion, period closing, claim generation, immutable document snapshot capture, stale evidence detection, manager approval, zero-priced sales orders, delivery reconciliation, and late-return exceptions are deferred to P02–P08 as specified in `README.md`.
-- This P01 module is an install foundation, not a functional settlement workflow and not ready to publish.
+- Period closing, claim generation, immutable document snapshot capture, stale evidence detection, manager approval, zero-priced sales orders, delivery reconciliation, and late-return adjustment workflow remain deferred to P03–P08. P02's calculator is non-persisting; refunds linked outside the requested period raise a review exception instead of being adjusted automatically.
+- The addon now includes a non-persisting P02 purchase calculator, but period closing through settlement remains unfinished; it is not ready to publish.
