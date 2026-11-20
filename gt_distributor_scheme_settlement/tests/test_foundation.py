@@ -338,6 +338,40 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
         self.assertEqual(claim.settled_at.date(), fields.Date.today())
         self.assertTrue(claim.adjustment_ids.filtered(lambda item: item.adjustment_type == "reward_return"))
 
+    def test_p06_late_refund_after_settlement_preserves_freeze_and_opens_exposure(self):
+        claim = self._p06_approved_claim("P06-SETTLED-REFUND", reward=5)
+        invoice = claim.source_ids.filtered(lambda row: row.source_role == "invoice").move_id
+        order, warehouse = self._p06_prepare_order(claim)
+        self.env["stock.quant"]._update_available_quantity(
+            claim.approved_reward_product_id, warehouse.lot_stock_id, 5
+        )
+        delivery = order.picking_ids.filtered(lambda item: item.picking_type_code == "outgoing")
+        delivery.action_assign()
+        delivery.move_ids.write({"quantity": 5, "picked": True})
+        delivery.button_validate()
+        claim.with_user(self.manager).action_finalize_settlement()
+        original_settled_at = claim.settled_at
+        original_approval_hash = claim.approval_evidence_hash
+        original_settlement_hash = claim.settlement_evidence_hash
+        self._create_invoice_one_line(
+            move_type="out_refund", product_id=self.product_a, quantity=10,
+            invoice_date="2026-02-12", partner_id=self.distributor.id,
+            reversed_entry_id=invoice.id, post=True,
+        )
+        validation = claim.with_user(self.manager).action_revalidate_sources()
+        self.assertEqual(validation["status"], "stale")
+        claim.invalidate_recordset()
+        adjustment = claim.adjustment_ids.filtered(lambda item: item.adjustment_type == "source_change")
+        self.assertEqual(claim.state, "adjustment_required")
+        self.assertEqual(claim.approved_reward_quantity, 5)
+        self.assertEqual(claim.approval_evidence_hash, original_approval_hash)
+        self.assertEqual(claim.settlement_evidence_hash, original_settlement_hash)
+        self.assertEqual(claim.settled_at, original_settled_at)
+        self.assertTrue(adjustment)
+        self.assertEqual(adjustment.quantity_delta, -5)
+        self.assertEqual(adjustment.potential_excess_fulfillment, 5)
+        self.assertEqual(claim.net_fulfilled_quantity, 5)
+
     def test_p05_manager_approves_current_claim_and_freezes_entitlement(self):
         claim = self._p05_reviewable_claim("P05-APPROVE")
         picking_count = self.env["stock.picking"].search_count([])
