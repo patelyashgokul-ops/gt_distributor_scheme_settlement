@@ -21,7 +21,7 @@ class DistributorSchemePeriod(models.Model):
     company_id = fields.Many2one(related="scheme_id.company_id", store=True, readonly=True, index=True)
     date_start = fields.Date(required=True)
     date_end = fields.Date(required=True)
-    state = fields.Selection([("draft", "Draft"), ("open", "Open"), ("closed", "Closed")], default="open", required=True, copy=False, tracking=True)
+    state = fields.Selection([("draft", "Draft"), ("open", "Open"), ("closed", "Closed")], default="open", required=True, copy=False)
     calculation_cutoff = fields.Datetime(string="Requested Calculation Cutoff", help="Required before closing. Records the requested as-of timestamp for the authoritative P03 calculation.")
     closing_cutoff = fields.Datetime(readonly=True, copy=False)
     closed_by_id = fields.Many2one("res.users", readonly=True, copy=False)

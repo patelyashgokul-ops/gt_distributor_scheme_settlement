@@ -70,6 +70,7 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
             "group_ids": [(6, 0, [
                 cls.env.ref("base.group_user").id,
                 cls.env.ref("gt_distributor_scheme_settlement.group_scheme_operator").id,
+                cls.env.ref("account.group_account_readonly").id,
             ])],
         })
         cls.manager = cls.env["res.users"].create({
