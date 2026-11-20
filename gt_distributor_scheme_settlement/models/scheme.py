@@ -1,5 +1,6 @@
 from odoo import api, fields, models, _
 from odoo.exceptions import AccessError, ValidationError
+from .service_tokens import PERIOD_SERVICE_TOKEN
 
 
 class DistributorScheme(models.Model):
@@ -23,6 +24,7 @@ class DistributorScheme(models.Model):
     period_ids = fields.One2many("gt.distributor.scheme.period", "scheme_id", string="Calculation Periods", copy=True)
     state = fields.Selection([("draft", "Draft"), ("active", "Active"), ("closed", "Closed"), ("cancelled", "Cancelled")], default="draft", required=True, copy=False, tracking=True)
     notes = fields.Text()
+    period_lock_version = fields.Integer(default=0, copy=False, readonly=True, groups="gt_distributor_scheme_settlement.group_scheme_manager")
 
     _scheme_code_company_uniq = models.Constraint(
         "unique(company_id, code)", "Scheme code must be unique per company."
@@ -52,6 +54,8 @@ class DistributorScheme(models.Model):
                 raise ValidationError(_("Eligible distributors must be company partners compatible with the scheme company."))
 
     def write(self, vals):
+        if "period_lock_version" in vals and self.env.context.get("_gt_period_service_token") is not PERIOD_SERVICE_TOKEN:
+            raise AccessError(_("Period coordination metadata is service-managed."))
         if "state" in vals and any(record.state != vals["state"] for record in self):
             raise ValidationError(_("Scheme lifecycle changes are reserved for a later workflow release."))
         configuration_fields = {

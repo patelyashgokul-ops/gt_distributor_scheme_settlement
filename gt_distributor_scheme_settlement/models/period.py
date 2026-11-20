@@ -6,7 +6,7 @@ from psycopg2 import IntegrityError, errorcodes
 from odoo import api, fields, models, _
 from odoo.exceptions import AccessError, UserError, ValidationError
 
-from .service_tokens import CLAIM_CREATE_TOKEN
+from .service_tokens import CLAIM_CREATE_TOKEN, PERIOD_SERVICE_TOKEN
 
 
 class DistributorSchemePeriod(models.Model):
@@ -43,6 +43,20 @@ class DistributorSchemePeriod(models.Model):
 
     @api.model_create_multi
     def create(self, vals_list):
+        scheme_ids = sorted({vals.get("scheme_id") for vals in vals_list if vals.get("scheme_id")})
+        if scheme_ids:
+            try:
+                with self.env.cr.savepoint():
+                    self.env.cr.execute("SELECT id FROM gt_distributor_scheme WHERE id = ANY(%s) ORDER BY id FOR UPDATE", [scheme_ids])
+                    schemes = self.env["gt.distributor.scheme"].browse(scheme_ids)
+                    for scheme in schemes:
+                        scheme.with_context(_gt_period_service_token=PERIOD_SERVICE_TOKEN).write({
+                            "period_lock_version": scheme.period_lock_version + 1,
+                        })
+            except Exception as error:
+                if error.__class__.__name__ == "SerializationFailure":
+                    raise UserError(_("A concurrent period configuration change interrupted this operation. Retry after it finishes.")) from error
+                raise
         for vals in vals_list:
             if vals.get("state", "open") not in ("draft", "open"):
                 raise ValidationError(_("A period must be created Draft or Open; closure requires the close service."))
@@ -70,6 +84,19 @@ class DistributorSchemePeriod(models.Model):
             raise ValidationError(_("Period lifecycle and closing evidence can only be changed by authorized period services."))
         if any(record.state == "closed" for record in self) and {"name", "scheme_id", "date_start", "date_end", "calculation_cutoff"}.intersection(vals):
             raise ValidationError(_("A closed period's identity and boundaries are immutable."))
+        if {"scheme_id", "date_start", "date_end"}.intersection(vals):
+            scheme_ids = sorted({record.scheme_id.id for record in self} | ({vals["scheme_id"]} if vals.get("scheme_id") else set()))
+            try:
+                with self.env.cr.savepoint():
+                    self.env.cr.execute("SELECT id FROM gt_distributor_scheme WHERE id = ANY(%s) ORDER BY id FOR UPDATE", [scheme_ids])
+                    for scheme in self.env["gt.distributor.scheme"].browse(scheme_ids):
+                        scheme.with_context(_gt_period_service_token=PERIOD_SERVICE_TOKEN).write({
+                            "period_lock_version": scheme.period_lock_version + 1,
+                        })
+            except Exception as error:
+                if error.__class__.__name__ == "SerializationFailure":
+                    raise UserError(_("A concurrent period configuration change interrupted this operation. Retry after it finishes.")) from error
+                raise
         return super().write(vals)
 
     def unlink(self):
