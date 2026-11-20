@@ -16,3 +16,4 @@ from . import fulfillment_wizard
 from . import sale_fulfillment
 from . import stock_fulfillment
 from . import adjustment_review_wizard
+from . import reporting

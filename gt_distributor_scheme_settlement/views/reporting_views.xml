@@ -1,0 +1,101 @@
+<odoo>
+    <record id="view_scheme_dashboard_form" model="ir.ui.view">
+        <field name="name">gt.distributor.scheme.dashboard.form</field>
+        <field name="model">gt.distributor.scheme.dashboard</field>
+        <field name="arch" type="xml">
+            <form string="Distributor Settlement Dashboard" create="0" delete="0">
+                <sheet>
+                    <div class="oe_title">
+                        <h1>Distributor Scheme Operations</h1>
+                        <div class="text-muted">Operational counts use claim creation dates when a date filter is set. Active schemes are counted by current status and are not date filtered.</div>
+                    </div>
+                    <group>
+                        <group string="Scope">
+                            <field name="company_id" groups="base.group_multi_company"/>
+                            <field name="scheme_id"/>
+                            <field name="distributor_id"/>
+                        </group>
+                        <group string="Claim Creation Date">
+                            <field name="claim_created_from"/>
+                            <field name="claim_created_to"/>
+                        </group>
+                    </group>
+                    <div class="row g-3 mt-2">
+                        <div class="col-6 col-xl-3"><div class="card h-100"><div class="card-body"><div class="text-muted">Active Schemes</div><h2><field name="active_scheme_count"/></h2></div></div></div>
+                        <div class="col-6 col-xl-3"><div class="card h-100"><div class="card-body"><div class="text-muted">Pending Review</div><h2><field name="pending_review_count"/></h2></div></div></div>
+                        <div class="col-6 col-xl-3"><div class="card h-100"><div class="card-body"><div class="text-muted">Approved Claims</div><h2><field name="approved_count"/></h2></div></div></div>
+                        <div class="col-6 col-xl-3"><div class="card h-100"><div class="card-body"><div class="text-muted">Fulfillment In Progress</div><h2><field name="fulfillment_count"/></h2></div></div></div>
+                        <div class="col-6 col-xl-3"><div class="card h-100"><div class="card-body"><div class="text-muted">Settled Claims</div><h2><field name="settled_count"/></h2></div></div></div>
+                        <div class="col-6 col-xl-3"><div class="card h-100"><div class="card-body"><div class="text-muted">Adjustment Required</div><h2><field name="adjustment_count"/></h2></div></div></div>
+                        <div class="col-6 col-xl-3"><div class="card h-100"><div class="card-body"><div class="text-muted">Open Late Refunds</div><h2><field name="late_refund_count"/></h2></div></div></div>
+                        <div class="col-6 col-xl-3"><div class="card h-100"><div class="card-body"><div class="text-muted">Outstanding, Releasable Claims</div><h2><field name="outstanding_delivery_count"/></h2></div></div></div>
+                        <div class="col-6 col-xl-3"><div class="card h-100"><div class="card-body"><div class="text-muted">Outstanding, On Hold</div><h2><field name="blocked_outstanding_count"/></h2></div></div></div>
+                    </div>
+                    <footer>
+                        <button name="action_open_report_wizard" type="object" string="Open Settlement Reports" class="btn-primary"/>
+                    </footer>
+                </sheet>
+            </form>
+        </field>
+    </record>
+    <record id="action_scheme_dashboard" model="ir.actions.act_window">
+        <field name="name">Settlement Dashboard</field>
+        <field name="res_model">gt.distributor.scheme.dashboard</field>
+        <field name="view_mode">form</field>
+        <field name="target">current</field>
+        <field name="context">{'default_company_id': allowed_company_ids and allowed_company_ids[0] or False}</field>
+    </record>
+    <record id="view_scheme_report_wizard_form" model="ir.ui.view">
+        <field name="name">gt.distributor.scheme.report.wizard.form</field>
+        <field name="model">gt.distributor.scheme.report.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Distributor Scheme Reports">
+                <sheet>
+                    <div class="oe_title"><h1>Settlement Reports</h1><div class="text-muted">Date filters use claim creation dates. Report quantities remain grouped by the reward product and unit.</div></div>
+                    <group>
+                        <group><field name="report_type"/><field name="company_id" groups="base.group_multi_company"/><field name="scheme_id"/><field name="distributor_id"/></group>
+                        <group string="Claim Creation Date"><field name="date_from"/><field name="date_to"/><field name="generated_at"/><field name="row_count"/></group>
+                    </group>
+                    <group string="Report Rows">
+                        <field name="line_ids" readonly="1" nolabel="1">
+                            <list create="0" edit="0" delete="0" limit="80">
+                                <field name="claim_reference" optional="show"/>
+                                <field name="scheme_name" optional="show"/>
+                                <field name="distributor_name" optional="show"/>
+                                <field name="reward_product_name" optional="show"/>
+                                <field name="reward_uom_name" optional="show"/>
+                                <field name="gross_quantity" optional="hide"/>
+                                <field name="refund_quantity" optional="hide"/>
+                                <field name="net_quantity" optional="hide"/>
+                                <field name="approved_quantity" optional="show"/>
+                                <field name="delivered_quantity" optional="show"/>
+                                <field name="returned_quantity" optional="hide"/>
+                                <field name="outstanding_quantity" optional="show"/>
+                                <field name="releasable_quantity" optional="hide"/>
+                                <field name="claim_state" widget="badge" optional="show"/>
+                                <field name="source_validation_status" widget="badge" optional="show"/>
+                                <field name="adjustment_reference" optional="hide"/>
+                                <field name="adjustment_type" optional="hide"/>
+                                <field name="adjustment_status" optional="hide"/>
+                                <field name="signed_difference" optional="hide"/>
+                                <field name="potential_excess" optional="hide"/>
+                                <field name="eligible_distributor_count" optional="hide"/>
+                                <field name="claim_count" optional="hide"/>
+                                <field name="approved_count" optional="hide"/>
+                                <field name="rejected_count" optional="hide"/>
+                                <field name="settled_count" optional="hide"/>
+                                <field name="open_adjustments" optional="hide"/>
+                            </list>
+                        </field>
+                    </group>
+                </sheet>
+                <footer>
+                    <button name="action_generate" type="object" string="Generate Report" class="btn-primary"/>
+                    <button name="action_export" type="object" string="Download CSV" class="btn-secondary" invisible="not generated_at"/>
+                    <button name="action_export" type="object" string="Download XLSX" class="btn-secondary" context="{'file_type': 'xlsx'}" invisible="not generated_at"/>
+                    <button string="Close" special="cancel" class="btn-secondary"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+</odoo>
