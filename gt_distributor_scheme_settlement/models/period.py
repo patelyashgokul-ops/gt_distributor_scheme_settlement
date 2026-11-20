@@ -1,7 +1,7 @@
 import hashlib
 import json
 
-from psycopg2 import IntegrityError
+from psycopg2 import IntegrityError, errorcodes
 
 from odoo import api, fields, models, _
 from odoo.exceptions import AccessError, UserError, ValidationError
@@ -52,6 +52,12 @@ class DistributorSchemePeriod(models.Model):
                 "eligible_distributor_count", "close_summary", "reward_totals",
             )):
                 raise ValidationError(_("Closing evidence is generated only by the period close service."))
+            scheme = self.env["gt.distributor.scheme"].browse(vals.get("scheme_id")).exists()
+            if not scheme:
+                raise ValidationError(_("Select an existing scheme for the period."))
+            scheme.check_access("read")
+            if scheme.company_id != self.env.company or scheme.company_id not in self.env.companies:
+                raise AccessError(_("Switch to the scheme company before creating its period."))
         return super().create(vals_list)
 
     def write(self, vals):
@@ -131,10 +137,12 @@ class DistributorSchemePeriod(models.Model):
                 with self.env.cr.savepoint():
                     return self._close_locked(cutoff)
             except IntegrityError as error:
-                if getattr(error, "diag", None) and error.diag.constraint_name in {
-                    "gt_scheme_claim_scope_uniq", "gt_claim_source_line_company_uniq",
-                }:
+                if error.pgcode == errorcodes.UNIQUE_VIOLATION:
                     raise UserError(_("A claim or source line was allocated by a concurrent operation. No partial period close was committed.")) from error
+                raise
+            except Exception as error:
+                if error.__class__.__name__ == "SerializationFailure":
+                    raise UserError(_("A concurrent period or accounting update interrupted closing. No claims were committed; retry after the other transaction finishes.")) from error
                 raise
 
     def _validate_close_boundary(self, cutoff):
@@ -280,7 +288,7 @@ class DistributorSchemePeriod(models.Model):
                 "snapshot_hash": snapshot_hash,
                 "snapshot_version": 1,
                 "snapshot_payload": snapshot,
-                "source_evidence_count": len(source_rows),
+                "source_evidence_count": sum(row["line_classification"] == "QUALIFYING" for row in source_rows),
                 "calculation_snapshot_at": fields.Datetime.now(),
                 "originating_scheme_code": scheme.code,
                 "created_by_id": self.env.user.id,

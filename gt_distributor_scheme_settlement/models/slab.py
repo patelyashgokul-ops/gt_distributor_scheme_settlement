@@ -42,3 +42,24 @@ class DistributorSchemeSlab(models.Model):
             others = rec.scheme_id.slab_ids - rec
             if any(not (rec.maximum_quantity and rec.maximum_quantity <= other.minimum_quantity or other.maximum_quantity and other.maximum_quantity <= rec.minimum_quantity) for other in others):
                 raise ValidationError(_("Slab quantity ranges for a scheme cannot overlap."))
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        scheme_ids = {vals.get("scheme_id") for vals in vals_list if vals.get("scheme_id")}
+        if self.env["gt.distributor.scheme"].browse(list(scheme_ids)).filtered(lambda scheme: scheme.state == "active"):
+            raise ValidationError(_("Purchase slabs cannot be changed after their scheme is activated."))
+        return super().create(vals_list)
+
+    def write(self, vals):
+        if any(slab.scheme_id.state == "active" for slab in self):
+            raise ValidationError(_("Purchase slabs cannot be changed after their scheme is activated."))
+        if "scheme_id" in vals:
+            target = self.env["gt.distributor.scheme"].browse(vals["scheme_id"])
+            if target.state == "active":
+                raise ValidationError(_("A slab cannot be added to an active scheme."))
+        return super().write(vals)
+
+    def unlink(self):
+        if any(slab.scheme_id.state == "active" for slab in self):
+            raise ValidationError(_("Purchase slabs cannot be deleted after their scheme is activated."))
+        return super().unlink()

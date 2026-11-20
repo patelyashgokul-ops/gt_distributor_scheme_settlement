@@ -40,6 +40,7 @@ class DistributorSchemeClaim(models.Model):
     snapshot_hash = fields.Char(required=True, readonly=True, copy=False, index=True)
     snapshot_version = fields.Integer(required=True, readonly=True, copy=False, default=1)
     snapshot_payload = fields.Json(required=True, readonly=True, copy=False)
+    snapshot_json = fields.Text(compute="_compute_snapshot_json", string="Calculation Snapshot", readonly=True)
     source_evidence_count = fields.Integer(required=True, readonly=True, copy=False)
     calculation_snapshot_at = fields.Datetime(required=True, readonly=True, copy=False)
     originating_scheme_code = fields.Char(required=True, readonly=True, copy=False)
@@ -74,6 +75,7 @@ class DistributorSchemeClaim(models.Model):
     fulfillment_picking_ids = fields.Many2many("stock.picking", string="Fulfillment Transfers", readonly=True, copy=False)
     source_ids = fields.One2many("gt.distributor.scheme.claim.source", "claim_id", string="Source Evidence", readonly=True)
     adjustment_ids = fields.One2many("gt.distributor.scheme.claim.adjustment", "claim_id", string="Adjustments", readonly=True)
+    audit_ids = fields.One2many("gt.distributor.scheme.audit", "claim_id", string="Audit History", readonly=True)
     note = fields.Text()
 
     _claim_scheme_distributor_period_uniq = models.Constraint(
@@ -96,7 +98,7 @@ class DistributorSchemeClaim(models.Model):
         "review_note", "source_validation_status", "source_change_category",
         "source_validation_at", "source_validation_result", "state", "approved_by_id",
         "approved_at", "fulfillment_order_id", "fulfillment_picking_ids", "source_ids",
-        "adjustment_ids",
+        "adjustment_ids", "audit_ids",
     }
 
     @api.model_create_multi
@@ -139,6 +141,11 @@ class DistributorSchemeClaim(models.Model):
                 raise ValidationError(_("Claim entitlement must match its positive reward quantity."))
             if claim.snapshot_payload and claim._hash_snapshot(claim.snapshot_payload) != claim.snapshot_hash:
                 raise ValidationError(_("Claim snapshot integrity verification failed."))
+
+    @api.depends("snapshot_payload")
+    def _compute_snapshot_json(self):
+        for claim in self:
+            claim.snapshot_json = json.dumps(claim.snapshot_payload or {}, sort_keys=True, indent=2, ensure_ascii=False)
 
     @api.constrains("scheme_id", "distributor_id", "period_id", "company_id", "slab_id", "qualifying_product_id")
     def _check_relations(self):
@@ -193,9 +200,22 @@ class DistributorSchemeClaim(models.Model):
             "period_end": fields.Date.to_string(period.date_end),
             "qualifying_product_id": scheme.qualifying_product_id.id,
             "qualifying_uom_id": scheme.qualifying_uom_id.id,
+            "scheme_date_start": fields.Date.to_string(scheme.date_start),
+            "scheme_date_end": fields.Date.to_string(scheme.date_end),
+            "reward_product_id": scheme.reward_product_id.id,
+            "reward_uom_id": scheme.reward_product_id.uom_id.id,
+            "selected_slab": False,
             "sources": sources,
             "exceptions": sorted((item["code"], item["severity"]) for item in result["exceptions"]),
         }
+        if result["slab_id"]:
+            slab = self.env["gt.distributor.scheme.slab"].browse(result["slab_id"])
+            payload["selected_slab"] = {
+                "id": slab.id,
+                "minimum_quantity": slab.minimum_quantity,
+                "maximum_quantity": slab.maximum_quantity or False,
+                "reward_quantity": slab.reward_quantity,
+            }
         return self._hash_snapshot(payload)
 
     @api.model
@@ -321,7 +341,8 @@ class DistributorSchemeClaim(models.Model):
         if not self.snapshot_payload or self._hash_snapshot(self.snapshot_payload) != self.snapshot_hash:
             raise ValidationError(_("The protected claim snapshot failed its integrity check."))
         source_payload = self.snapshot_payload.get("sources", [])
-        if len(source_payload) != self.source_evidence_count:
+        allocated_count = sum(row.get("line_classification") == "QUALIFYING" for row in source_payload)
+        if allocated_count != self.source_evidence_count or len(self.source_ids) != self.source_evidence_count:
             raise ValidationError(_("The protected claim snapshot source count does not match its evidence."))
         return True
 
