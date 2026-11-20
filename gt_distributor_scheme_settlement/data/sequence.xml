@@ -1,0 +1,9 @@
+<odoo>
+    <record id="sequence_scheme_claim" model="ir.sequence">
+        <field name="name">Distributor Scheme Claim</field>
+        <field name="code">gt.distributor.scheme.claim</field>
+        <field name="prefix">DSC/%(year)s/</field>
+        <field name="padding">5</field>
+        <field name="company_id" eval="False"/>
+    </record>
+</odoo>
