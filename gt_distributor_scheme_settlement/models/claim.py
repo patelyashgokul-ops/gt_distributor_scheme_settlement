@@ -736,10 +736,14 @@ class DistributorSchemeClaim(models.Model):
         if revision and revision.state != "proposed":
             raise UserError(_("The active claim revision is no longer pending approval."))
         prohibited_users = {self.created_by_id.id, self.submitted_by_id.id}
-        if revision:
-            if revision._hash_payload(revision.snapshot_payload) != revision.snapshot_hash:
+        for historical_revision in self.revision_ids:
+            if historical_revision._hash_payload(historical_revision.snapshot_payload) != historical_revision.snapshot_hash:
                 raise ValidationError(_("The proposed revision evidence failed its integrity check."))
-            prohibited_users.update((revision.requested_by_id.id, revision.prepared_by_id.id))
+            prohibited_users.update((historical_revision.requested_by_id.id, historical_revision.prepared_by_id.id))
+        historical_actors = self.env["gt.distributor.scheme.audit"].search([
+            ("claim_id", "=", self.id), ("event_type", "in", ["claim_submitted", "claim_revision_prepared"]),
+        ]).mapped("actor_id").ids
+        prohibited_users.update(historical_actors)
         if not self.env.user.id or self.env.user.id in prohibited_users:
             raise AccessError(_("Approval blocked: the claim creator, submitter, revision requester, or preparer cannot approve this entitlement."))
         expected_fingerprint = revision.source_fingerprint if revision else self.source_fingerprint
