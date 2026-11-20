@@ -37,12 +37,12 @@ access_decision_wizard_operator,claim decision wizard operator,gt.distributor.sc
 access_decision_wizard_manager,claim decision wizard manager,gt.distributor.scheme.claim.decision.wizard,gt_distributor_scheme_settlement.group_scheme_manager,cru,
 access_fulfillment_wizard_manager,fulfillment wizard manager,gt.distributor.scheme.fulfillment.wizard,gt_distributor_scheme_settlement.group_scheme_manager,cru,
 access_adjustment_review_wizard_manager,adjustment review wizard manager,gt.distributor.scheme.adjustment.review.wizard,gt_distributor_scheme_settlement.group_scheme_manager,cru,
-access_scheme_dashboard_operator,scheme dashboard operator,gt.distributor.scheme.dashboard,gt_distributor_scheme_settlement.group_scheme_operator,cru,
-access_scheme_dashboard_manager,scheme dashboard manager,gt.distributor.scheme.dashboard,gt_distributor_scheme_settlement.group_scheme_manager,cru,
-access_scheme_dashboard_auditor,scheme dashboard auditor,gt.distributor.scheme.dashboard,gt_distributor_scheme_settlement.group_scheme_auditor,cru,
-access_scheme_report_operator,scheme report operator,gt.distributor.scheme.report.wizard,gt_distributor_scheme_settlement.group_scheme_operator,cru,
-access_scheme_report_manager,scheme report manager,gt.distributor.scheme.report.wizard,gt_distributor_scheme_settlement.group_scheme_manager,cru,
-access_scheme_report_auditor,scheme report auditor,gt.distributor.scheme.report.wizard,gt_distributor_scheme_settlement.group_scheme_auditor,cru,
-access_scheme_report_line_operator,scheme report line operator,gt.distributor.scheme.report.line,gt_distributor_scheme_settlement.group_scheme_operator,crud,
-access_scheme_report_line_manager,scheme report line manager,gt.distributor.scheme.report.line,gt_distributor_scheme_settlement.group_scheme_manager,crud,
-access_scheme_report_line_auditor,scheme report line auditor,gt.distributor.scheme.report.line,gt_distributor_scheme_settlement.group_scheme_auditor,crud,
+access_scheme_dashboard_operator,scheme dashboard operator,gt.distributor.scheme.dashboard,gt_distributor_scheme_settlement.group_scheme_operator,cru,"[('company_id', 'in', company_ids)]"
+access_scheme_dashboard_manager,scheme dashboard manager,gt.distributor.scheme.dashboard,gt_distributor_scheme_settlement.group_scheme_manager,cru,"[('company_id', 'in', company_ids)]"
+access_scheme_dashboard_auditor,scheme dashboard auditor,gt.distributor.scheme.dashboard,gt_distributor_scheme_settlement.group_scheme_auditor,cru,"[('company_id', 'in', company_ids)]"
+access_scheme_report_operator,scheme report operator,gt.distributor.scheme.report.wizard,gt_distributor_scheme_settlement.group_scheme_operator,cru,"[('company_id', 'in', company_ids)]"
+access_scheme_report_manager,scheme report manager,gt.distributor.scheme.report.wizard,gt_distributor_scheme_settlement.group_scheme_manager,cru,"[('company_id', 'in', company_ids)]"
+access_scheme_report_auditor,scheme report auditor,gt_distributor.scheme.report.wizard,gt_distributor_scheme_settlement.group_scheme_auditor,cru,"[('company_id', 'in', company_ids)]"
+access_scheme_report_line_operator,scheme report line operator,gt.distributor.scheme.report.line,gt_distributor_scheme_settlement.group_scheme_operator,crud,"[('company_id', 'in', company_ids)]"
+access_scheme_report_line_manager,scheme report line manager,gt.distributor.scheme.report.line,gt_distributor_scheme_settlement.group_scheme_manager,crud,"[('company_id', 'in', company_ids)]"
+access_scheme_report_line_auditor,scheme report line auditor,gt.distributor.scheme.report.line,gt_distributor_scheme_settlement.group_scheme_auditor,crud,"[('company_id', 'in', company_ids)]"

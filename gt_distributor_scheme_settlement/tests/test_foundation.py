@@ -1513,6 +1513,11 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
             self.env["gt.distributor.scheme.dashboard"].with_user(self.operator).create({
                 "company_id": self.company_b.id,
             })._get_metrics()
+        foreign_dashboard = self.env["gt.distributor.scheme.dashboard"].sudo().create({
+            "company_id": self.company_b.id,
+        })
+        with self.assertRaises(AccessError):
+            foreign_dashboard.with_user(self.operator).check_access("read")
 
     def test_p07_distributor_and_outstanding_reports_use_approved_and_stock_values(self):
         claim = self._p06_approved_claim("P07-DIST-REPORT", reward=5)
