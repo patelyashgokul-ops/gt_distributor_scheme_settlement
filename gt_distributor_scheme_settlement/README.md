@@ -11,7 +11,7 @@ Copy this directory into an Odoo 20 Community addons path, update the Apps list,
 The inspected Odoo 20 checkout declares Python 3.12–3.13 and PostgreSQL 16 minimum. Use a supported Python runtime and a disposable PostgreSQL database for automated tests. Run:
 
 ```powershell
-python odoo-bin --addons-path="<odoo-addons>,<custom-addons>" --db_host=127.0.0.1 --db_port=<disposable-port> --db_user=<test-user> --db_password=<test-password> --database=gt_scheme_p01_test --init=gt_distributor_scheme_settlement --test-enable --stop-after-init --without-demo=all
+python odoo-bin --addons-path="<odoo-addons>,<custom-addons>" --db_host=127.0.0.1 --db_port=<disposable-port> --db_user=<test-user> --db_password=<test-password> --database=gt_scheme_p01_test --init=gt_distributor_scheme_settlement --test-enable --stop-after-init --without-demo
 ```
 
 Do not point this command at production or shared databases. The full P01 test report and environment limitations are in `TEST_REPORT.md`.

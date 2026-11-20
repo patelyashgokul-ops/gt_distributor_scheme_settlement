@@ -9,7 +9,8 @@ Date: 2026-11-20
 - Project virtual environment: `C:\PycharmProjects\odoo20\.venv`, Python 3.14.6. It has `psycopg2` and `lxml`; Odoo is loaded from source.
 - Odoo 20 source declares Python 3.12 minimum, Python 3.14 maximum exclusive, and PostgreSQL 16 minimum. Therefore the discovered Python 3.14.6 runtime is outside the supported range.
 - PostgreSQL 18 Windows service is running. No credentials or database contents were inspected. No existing database was used.
-- Odoo source inspection confirmed `sale.order` is defined in Community `sale/models/sale_order.py`; Odoo 20 core view type includes `list`; `fields.Json` is used in core. Dependencies are `sale_management`, `account`, and `stock`; the inspected source is Community edition.
+- An isolated PostgreSQL 18 cluster initialized successfully under `.test/pgdata`, but `pg_ctl start` failed with Windows sandbox restricted-token errors (`could not create restricted token`, error 87 / re-execute error 3). The initialized temporary cluster was removed after the failed start. Port 55498 returned `no response`.
+- Odoo source inspection confirmed `sale.order` (`sale/models/sale_order.py`); `account.move` and `account.move.line` (`account/models`); `stock.picking` (`stock/models/stock_picking.py`); `product.product` (`product/models/product_product.py`); and `res.partner` (`odoo/addons/base/models/res_partner.py`). The inspected fields include move type/state/invoice date/reversed-entry link, move-line product/UoM/quantity/document links, picking state/company/return link, product UoM, and partner company identity. Odoo 20 core view type includes `list`, and `fields.Json` is used in core.
 - License evidence: the Community checkout's dependency manifests use LGPL-3. Odoo's published license documentation lists OPL-1 as a supported module manifest license and permits compatible licenses for modules using Odoo as a library. This addon contains no copied Odoo source. This is a technical compatibility check, not legal advice.
 
 ## Results
@@ -18,12 +19,12 @@ Date: 2026-11-20
 |---|---|---|
 | Odoo 20 Community source discovered | PASS | `odoo/release.py` reports 20.0; Community addons tree is present. |
 | Runtime / PostgreSQL config verified | PARTIAL | Python 3.14.6 and PostgreSQL 18 service found; supported Python 3.12–3.13 runtime and a dedicated disposable DB configuration were not available. |
-| Required source model/API inspection | PARTIAL | `sale.order`, core `list` view type, and `fields.Json` confirmed. `account.move`, `account.move.line`, `stock.picking`, `product.product`, and `res.partner` were not fully audited for later workflow APIs in P01. |
+| Required source model/API inspection | PASS | All named source models and baseline accounting, product, partner, and stock fields listed above were inspected. Future workflow APIs still need focused verification when implemented. |
 | Manifest metadata and dependency declarations | PASS | Odoo 20 manifest structure; dependencies are Community addons `sale_management`, `account`, `stock`; version `20.0.1.0.0`. |
 | OPL-1 metadata and dependency licensing | PASS | OPL-1 manifest value; dependency manifests declare LGPL-3; no source copied. Publisher/distribution legal review remains outside this technical check. |
-| Python syntax compilation | NOT RUN | Not run because the active interpreter is outside the Odoo 20 supported version range; no unsupported-runtime pass is claimed. |
-| XML parse and module manifest load | NOT RUN | Requires Odoo's supported runtime for meaningful module loading; no standalone parse result is represented as install validation. |
-| Registry setup, fresh install, ACL/rule evaluation, and module tests | NOT RUN | No dedicated disposable PostgreSQL database was provisioned. The running PostgreSQL service was not used. |
+| Python syntax compilation | PASS | All 13 addon Python files compiled with Python 3.14.6. Odoo runtime compatibility is separate and NOT RUN. |
+| XML well-formedness and manifest literal parsing | PASS | All 8 XML files parsed and manifest loaded as a Python literal. This does not validate Odoo's XML schema/registry. |
+| Registry setup, fresh install, ACL/rule evaluation, and module tests | NOT RUN | `pg_ctl start` could not start the isolated cluster. Odoo test command with `--db_port=55498 --db_user=odoo_test --database=gt_scheme_p01_test --init=gt_distributor_scheme_settlement --test-enable --stop-after-init --without-demo` exited on PostgreSQL connection refused (`127.0.0.1:55498`). No registry or module tests ran. The running PostgreSQL service was not used. |
 
 ## Acceptance checks
 

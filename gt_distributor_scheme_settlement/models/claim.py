@@ -24,6 +24,10 @@ class DistributorSchemeClaim(models.Model):
     adjustment_ids = fields.One2many("gt.distributor.scheme.claim.adjustment", "claim_id", string="Adjustments")
     note = fields.Text()
 
+    _sql_constraints = [
+        ("claim_scheme_distributor_period_uniq", "unique(scheme_id, distributor_id, period_id)", "Only one claim is allowed per scheme, distributor, and period."),
+    ]
+
     @api.model_create_multi
     def create(self, vals_list):
         for vals in vals_list:
