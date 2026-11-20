@@ -410,6 +410,8 @@ class DistributorSchemeCalculator(models.AbstractModel):
         seen = set()
         reversed_credit_quantities = defaultdict(float)
         for move in reversals:
+            if move.invoice_date and move.invoice_date > cutoff.date():
+                continue
             origin_refund = move.reversed_entry_id
             origin_invoice = origin_refund.reversed_entry_id
             if not origin_invoice:

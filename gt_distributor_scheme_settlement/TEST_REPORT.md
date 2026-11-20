@@ -53,6 +53,7 @@ Odoo reported `0 failed, 0 error(s) of 11 tests` in `.test/odoo-p02-rerun.log`. 
 - Reworked `models/calculator.py` into a reusable, permission-checked read-only service. The P02 `calculate_entitlement(scheme_id, distributor_id, period_id)` entry point remains as a compatibility wrapper and preserves its earlier `qualified` / `below_threshold` status and review exception behavior.
 - Added `calculate_eligibility(scheme_id, distributor_id, date_start, date_end, as_of)`, explicit `ELIGIBLE` / `NOT_ELIGIBLE` / `BLOCKED` outcomes, scoped exception codes, deterministic sorted evidence, and a SHA-256 source fingerprint.
 - Added native `gt.distributor.scheme.preview.wizard`, form, scheme button, role ACLs, result tamper guard, and source evidence display. Preview does not create persistent claims, stock moves, or accounting entries.
+- Manifest version is now `20.0.3.0.0`; the addon still depends only on Community `sale`, `account`, `stock`, and `mail`. No core or vendor source was modified.
 - The engine retains P02 commercial-partner matching. A test verifies that an invoice on a child contact resolves to its configured distributor company, matching P02 behavior.
 - Uses only `account.move` and `account.move.line` with company, commercial partner, `out_invoice`/`out_refund`, posted state, invoice date, and qualifying product scope. Sales orders and stock records are not purchase fallbacks. Odoo 20 source confirms `move_type`, `state`, `invoice_date`, `commercial_partner_id`, `reversed_entry_id`, `display_type`, `product_id`, `product_uom_id`, `quantity`, `price_subtotal`, `create_date`, and `write_date`.
 - Counts only `display_type == 'product'` qualifying lines with positive untaxed subtotal and positive quantity. Zero-value and fully discounted lines are retained as excluded evidence; negative value/quantity and incompatible UoMs block the preview.
@@ -67,7 +68,7 @@ Odoo reported `0 failed, 0 error(s) of 11 tests` in `.test/odoo-p02-rerun.log`. 
 | Check | Result | Evidence |
 |---|---|---|
 | Clean install, registry, wizard view and ACL load | PASS (Python 3.14.6 unsupported) | Fresh disposable database `gt_scheme_p03_test`; Odoo loaded the addon, new transient model, ACL rows, and preview XML. The initial full run then exposed test defects; the final module update run below passed. |
-| P01/P02 regression and P03 ORM suite | PASS (Python 3.14.6 unsupported) | Odoo final result: `0 failed, 0 error(s) of 28 tests`; module test statistics: 29 tests. `.test/odoo-p03-rerun.log`. |
+| P01/P02 regression and P03 ORM suite | PASS (Python 3.14.6 unsupported) | Odoo final result: `0 failed, 0 error(s) of 28 tests`; module test statistics: 30 tests. `.test/odoo-p03-rerun.log`. |
 | Python syntax / XML / manifest | PASS | 15 Python files parsed, 8 XML files parsed, manifest literal loaded using Python 3.14.6 after final source changes. |
 | P03 production Python support | NOT RUN | Only Python 3.14.6 was available; Odoo 20 source declares Python 3.12–3.13. |
 | Large-volume performance benchmark | NOT RUN | No 1,000-line or representative distributor-volume benchmark was executed. Final Odoo run reported 6,970 module-stat queries across tests, not a performance benchmark. |
