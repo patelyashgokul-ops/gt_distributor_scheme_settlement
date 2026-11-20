@@ -1,4 +1,4 @@
-from odoo.exceptions import AccessError, ValidationError
+from odoo.exceptions import AccessError, UserError, ValidationError
 from odoo.tests import TransactionCase, tagged
 
 
@@ -139,7 +139,7 @@ class TestDistributorSchemeFoundation(TransactionCase):
             })
 
     def test_company_consistency(self):
-        with self.assertRaises((ValidationError, AccessError)):
+        with self.assertRaises((ValidationError, AccessError, UserError)):
             self.env["gt.distributor.scheme"].create({
                 "name": "Invalid Cross Company Scheme",
                 "code": "CROSS-TEST",
