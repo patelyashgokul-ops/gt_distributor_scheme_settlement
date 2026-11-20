@@ -37,6 +37,11 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
             company_id=cls.company_a.id,
             uom_id=cls.uom_unit.id,
         )
+        cls.shared_product = cls._create_product(
+            name="Scheme Test Shared Product",
+            company_id=False,
+            uom_id=cls.uom_unit.id,
+        )
         cls.product_b = cls._create_product(
             name="Scheme Test Company B Product",
             company_id=cls.company_b.id,
@@ -257,10 +262,51 @@ class TestDistributorSchemeFoundation(AccountTestInvoicingCommon):
         self.assertEqual(result["gross_quantity"], 5)
         self.assertEqual(result["invoice_count"], 1)
 
+    def test_same_shared_product_invoice_in_other_company_is_isolated(self):
+        self._basic_slab()
+        self.scheme.write({"qualifying_product_id": self.shared_product.id})
+        self._create_invoice_one_line(product_id=self.shared_product, quantity=5, invoice_date="2026-01-10",
+                                      partner_id=self.distributor.id, company_id=self.company_a.id, post=True)
+        revenue = self.env["account.account"].create({
+            "name": "Company B Scheme Revenue",
+            "code": "B410001",
+            "account_type": "income",
+            "company_ids": [(6, 0, [self.company_b.id])],
+        })
+        receivable = self.env["account.account"].create({
+            "name": "Company B Scheme Receivable",
+            "code": "B110001",
+            "account_type": "asset_receivable",
+            "reconcile": True,
+            "company_ids": [(6, 0, [self.company_b.id])],
+        })
+        self.distributor.with_company(self.company_b).property_account_receivable_id = receivable
+        journal = self.env["account.journal"].create({
+            "name": "Company B Sales",
+            "type": "sale",
+            "code": "BSALE",
+            "company_id": self.company_b.id,
+            "default_account_id": revenue.id,
+        })
+        invoice_b = self.env["account.move"].with_company(self.company_b).create({
+            "move_type": "out_invoice",
+            "company_id": self.company_b.id,
+            "journal_id": journal.id,
+            "partner_id": self.distributor.id,
+            "invoice_date": "2026-01-11",
+            "invoice_line_ids": [self._prepare_invoice_line(
+                product_id=self.shared_product, quantity=500, account_id=revenue.id,
+            )],
+        })
+        invoice_b.action_post()
+        result = self._preview()
+        self.assertEqual(result["gross_quantity"], 5)
+        self.assertNotIn(invoice_b.id, {row["move_id"] for row in result["invoice_sources"]})
+
     def test_unposted_credit_note_does_not_reduce_preview(self):
         self._basic_slab()
-        self._create_invoice_one_line(product_id=self.product_a, quantity=10,
-                                      invoice_date="2026-01-10", partner_id=self.distributor.id, post=True)
+        invoice = self._create_invoice_one_line(product_id=self.product_a, quantity=10,
+                                                invoice_date="2026-01-10", partner_id=self.distributor.id, post=True)
         self._create_invoice_one_line(move_type="out_refund", product_id=self.product_a, quantity=5,
                                       invoice_date="2026-01-20", partner_id=self.distributor.id,
                                       reversed_entry_id=invoice.id, post=False)
